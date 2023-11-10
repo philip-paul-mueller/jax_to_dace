@@ -1,8 +1,10 @@
-from typing import Optional
-
 import numpy as np
 import jax
 import dace
+
+from typing import Optional
+
+from jax._src.core import ClosedJaxpr, JaxprEqn, Jaxpr
 
 
 class JaxprToSDFG:
@@ -10,6 +12,11 @@ class JaxprToSDFG:
 
     The implementation of this class does not handle the case of dynamic translation.
     It is a stateless object and all internal members are cleared at the end.
+
+    Todo:
+    - Return value is not handled correctly or at all.
+    - there is some issue with the datatype.
+    - Litterals are not handled at all.
     """
 
     def __init__(self):
@@ -20,14 +27,14 @@ class JaxprToSDFG:
     #
 
 
-    def __call__(self, jaxpr: jax.core.ClosedJaxp) -> dace.SDFG:
+    def __call__(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
         """An alias for `self.transform(jaxpr)`.
         """
         return self.transform(jaxpr)
     #
 
 
-    def transform(self, jaxpr: jax.core.ClosedJaxp) -> dace.SDFG:
+    def transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
         """Transforms the `jaxpr` into an SDFG and returns it.
 
         The idea of the transformation is quite simple.
@@ -63,12 +70,12 @@ class JaxprToSDFG:
     #
 
 
-    def _transform(self, jaxpr: jax.core.ClosedJaxp) -> dace.SDFG:
+    def _transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
         """This function does the actuall transformation, but it does not reset the internal state.
         """
         if self.m_sdfg is not None:
             raise RuntimeError("Expected the that `self` is in an initial state, but it does not seem to be the case.")
-        if not isinstance(jaxpr, jax.core.ClosedJaxp):
+        if not isinstance(jaxpr, ClosedJaxpr):
             raise TypeError(f"Expected a `jax.core.ClosedJaxp` instance but got `{type(jaxpr)}`")
         if len(jaxpr.effects) != 0:
             raise ValueError(f"Currently `Jaxpr` instances with side effects are not supported.")
@@ -87,12 +94,20 @@ class JaxprToSDFG:
         self.m_inpNames = set()
         self._createInputs(jaxpr)
 
+        # Now transforming every equation one by one.
+        for eqn in jaxpr.jaxpr.eqns:
+            self._translateEqn(jaxpr, eqn)
+        #
+
+        # TODO(phimuell):
+        #  Handle the `__return` value case.
+
+        return self.m_sdfg
+    #
 
 
-
-
-    def _createInputs(self, jaxpr: jax.core.ClosedJaxp):
-        """Creates the inputs 
+    def _createInputs(self, jaxpr: ClosedJaxpr):
+        """Creates the initial inputs.
         """
         # We have to iterate through the non closed jaxpr, because there the names are removed.
         for inp in jaxpr.jaxpr.invars:
@@ -113,37 +128,41 @@ class JaxprToSDFG:
             arg:            The Jax object that should be maped to dace.
             isTransient:    If a transent should be created, by default.
         """
-        arg = str(arg)          # Ensure that we have a string.
-        if(len(arg) == 0):
-            raise ValueError(f"Got an empty name.")
-        elif(arg[0].isdigit()):
-            raise ValueError(f"Requested to create the array '{arg}', is ilegal since it starts with a digit.")
-        elif(any([x.isspace()  for x in arg])):
-            raise ValueError(f"The name of the array, '{arg}', to create contained a space!")
-        if arg in self.m_sdfg.arrays:
-            raise ValueError(f"The variable `{str(arg)}` is already recorded in the SDFG.")
         if isinstance(arg, jax._src.core.Var):
             pass
         elif isinstance(arg, jax._src.core.Literal):
             raise NotImplementedError(f"Jax Literals are not yet implemented.")
         else:
             raise TypeError(f"Does not know how to handle {type(arg)}.")
-        name    = arg
+        #
+
+        argName = str(arg)          # Ensure that we have a string.
+        if argName in self.m_sdfg.arrays:
+            raise ValueError(f"The variable `{str(arg)}` is already recorded in the SDFG.")
+        if(len(argName) == 0):
+            raise ValueError(f"Got an empty name.")
+        elif(argName[0].isdigit()):
+            raise ValueError(f"Requested to create the array '{arg}', is ilegal since it starts with a digit.")
+        elif(any([x.isspace()  for x in argName])):
+            raise ValueError(f"The name of the array, '{arg}', to create contained a space!")
+        #
+        name    = argName
         shape   = arg.aval.shape
         strides = shape     # For now
-        offset  = 0
-        dtype   = arg.aval.dtype
+        offset  = None
+        dtype   = self._translateDType(arg.aval.dtype)
         self.m_sdfg.add_array(
                 name=name, shape=shape, strides=strides,
-                offset=offset, dtype=dtype, transform=isTransient
+                offset=offset, dtype=dtype, transient=isTransient
         )
+        assert name in self.m_sdfg.arrays
         return name
     # end def: _addArray
 
 
     def _translateEqn(self,
-            closedJaxp: jax.core.ClosedJaxp,
-            eqn: jax._src.core.JaxprEqn,
+            closedJaxp: ClosedJaxpr,
+            eqn: JaxprEqn,
     ):
         """This function translates the equation (statement) to an SDFG state.
 
@@ -152,8 +171,8 @@ class JaxprToSDFG:
         This function will also modify the current head.
         """
         assert isinstance(eqn, jax._src.core.JaxprEqn)
-        assert all([out not in self.m_sdfg.arrays  for out in eqn.outvars])
-        assert all([inp     in self.m_sdfg.arrays  for inp in eqn.invars ])
+        assert all([str(out) not in self.m_sdfg.arrays  for out in eqn.outvars])
+        assert all([str(inp)     in self.m_sdfg.arrays  for inp in eqn.invars ]), f"Expected to find input '{[ str(inp)  for inp in eqn.invars if str(inp) not in self.m_sdfg.arrays]}'"
         assert len(eqn.invars)  >  0
         assert len(eqn.outvars) == 1, f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}"
         assert all([eqn.outvars[0].aval.shape == inp.aval.shape  for inp in eqn.invars]), f"Found different shapes."
@@ -162,17 +181,10 @@ class JaxprToSDFG:
         # Inside this state we will add everything that is related to this equation.
         eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=str(eqn))
 
-        # Now we create the variables for the output arrays and access notes
+        # Now we create the variables for the output arrays
         for out in eqn.outvars:
-            oname = self._addArray(out)
-            eqnState.add_write(oname)
+            _ = self._addArray(out)
         #
-
-        # Further for every input we now create a read access
-        for inp in eqn.invars:
-            eqnState.add_read(str(inp))
-        #
-
         pName = eqn.primitive.name
 
         if pName == "__my_special_name":
@@ -189,8 +201,8 @@ class JaxprToSDFG:
 
 
     def _handleSimpleCase(self,
-            closedJaxp: jax.core.ClosedJaxp,
-            eqn: jax._src.core.JaxprEqn,
+            closedJaxp: ClosedJaxpr,
+            eqn: JaxprEqn,
             eqnState: dace.SDFGState,
     ):
         """This function handles the most simple cases, where basically a mapped tasklet can be used for the translation.
@@ -231,8 +243,8 @@ class JaxprToSDFG:
 
         tInpNames = [ str(x)  for x in eqn.invars ]
         tInputs = {}
-        for inputI in range(len(eqn.inputs)):
-            tInputs[f'__in{inputI}'] = dace.Memlet.simple(tInpNames[inputI], ", ".join([f'__i{dim}'  for dim in range(len(eqn.inputs[inputI].aval.shape))]))
+        for inputI in range(len(eqn.invars)):
+            tInputs[f'__in{inputI}'] = dace.Memlet.simple(tInpNames[inputI], ", ".join([f'__i{dim}'  for dim in range(len(eqn.invars[inputI].aval.shape))]))
         #
 
         tCode = None
@@ -252,11 +264,22 @@ class JaxprToSDFG:
                 map_ranges=tMapRanges,
                 inputs=tInputs,
                 code=tCode,
-                outputs=tOutputs
+                outputs=tOutputs,
+                external_edges=True,
         )
 
         return self
     # end def: _handleSimpleCase
+
+
+    @staticmethod
+    def _translateDType(dtype):
+        """Translate some special interest dtypes into others more usefull types.
+        """
+        # TODO(phimuell):
+        #  Why does `return dtype` does not work it is essentially `arg.aval.dtype`?
+        return np.float64
+    # end def: _translateDType
 
 # end class(JaxprToSDFG):
    
