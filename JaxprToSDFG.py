@@ -179,7 +179,7 @@ class JaxprToSDFG:
         assert len(eqn.effects) == 0
 
         # Inside this state we will add everything that is related to this equation.
-        eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=str(eqn))
+        eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
 
         # Now we create the variables for the output arrays
         for out in eqn.outvars:
@@ -224,17 +224,17 @@ class JaxprToSDFG:
            raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
 
         unarryOps = {
-                "???": "__out = +(__in1)",
-                "??": "__out = -(__in1)",
-                "sin":      "__out = sin(__in1)",
-                "cos":      "__out = cos(__in1)",
+                "???": "__out = +(__in0)",
+                "??": "__out = -(__in0)",
+                "sin":      "__out = sin(__in0)",
+                "cos":      "__out = cos(__in0)",
         }
         binarryOps = {
-                "add":      "__out = (__in1)+(__in2)",
-                "sub":      "__out = (__in1)-(__in2)",
-                "mul":      "__out = (__in1)*(__in2)",
-                "div":      "__out = (__in1)/(__in2)",
-                "pow":      "__out = (__in1)**(__in2)",
+                "add":      "__out = (__in0)+(__in1)",
+                "sub":      "__out = (__in0)-(__in1)",
+                "mul":      "__out = (__in0)*(__in1)",
+                "div":      "__out = (__in0)/(__in1)",
+                "pow":      "__out = (__in0)**(__in1)",
         }
 
         # We will now create a mapped tasklet that will do all the calculations.
