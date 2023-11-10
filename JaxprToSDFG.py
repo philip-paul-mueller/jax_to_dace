@@ -218,15 +218,17 @@ class JaxprToSDFG:
         eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
 
         # Now we create the variables for the output arrays
+        outVars = []
         for out in eqn.outvars:
-            _ = self._addArray(out)
+            outVar = self._addArray(out)
+            outVars.append(outVar)
         #
         pName = eqn.primitive.name
 
         if pName == "__my_special_name":
             raise NotImplementedError(f"Does not know how to handle primitive '{pName}'.")
         else:
-            self._handleSimpleCase(closedJaxp=closedJaxp, eqn=eqn, eqnState=eqnState)
+            self._handleSimpleCase(closedJaxp=closedJaxp, eqn=eqn, eqnState=eqnState, outVars=outVars)
         #
 
         # The head has changed
@@ -240,8 +242,16 @@ class JaxprToSDFG:
             closedJaxp: ClosedJaxpr,
             eqn: JaxprEqn,
             eqnState: dace.SDFGState,
+            outVars: list[str],
+
     ):
         """This function handles the most simple cases, where basically a mapped tasklet can be used for the translation.
+
+        Args:
+            closedJaxp:         The `Jaxpr` closed variable, i.e. the object that should be translated.
+            eqn:                The equation (statement) that is currently translated.
+            eqnState:           The `SDFGState` into which we will generate the translated version.
+            outVars:            List of all arrays into which we write the result.
 
         This function assumes the following:
         - Simple arethmetic operation `+`, `-`, `*`, `/` or `-` (unary).
@@ -258,6 +268,7 @@ class JaxprToSDFG:
            raise ValueError(f"Expected that the input arguments have the same shape.")
         if(eqn.invars[0].aval.shape != eqn.outvars[0].aval.shape):
            raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
+        assert all([outVar in self.m_sdfg.arrays  for outVar in outVars])
 
         unarryOps = {
                 "???": "__out = +(__in0)",
