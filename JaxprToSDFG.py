@@ -63,10 +63,6 @@ class JaxprToSDFG:
         """
         self.m_sdfgHead: Optional[dace.SDFGState] = None
 
-        """Set of all input variables.
-        """
-        self.m_inpNames: Optional[set[str]] = None
-
         """Maps sizes (literals) to their respective symbol names in the SDFG.
         Since SDFG has symbolic sizes but Jax has concrete sizes, we use this maping to ensure that all sizes have the same symbol.
         """
@@ -97,7 +93,6 @@ class JaxprToSDFG:
         self.m_sdfgHead = self.m_sdfg.add_state(label="initial_state", is_start_state=True)
 
         # Now we are creating the inputs
-        self.m_inpNames = set()
         self._createInputs(jaxpr)
 
         # Now transforming every equation one by one.
@@ -117,8 +112,7 @@ class JaxprToSDFG:
         """
         # We have to iterate through the non closed jaxpr, because there the names are removed.
         for inp in jaxpr.jaxpr.invars:
-            name = self._addArray(inp, isTransient=False)
-            self.m_inpNames.add(name)
+            _ = self._addArray(inp, isTransient=False)
         #
         return
     #
