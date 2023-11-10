@@ -17,6 +17,7 @@ class JaxprToSDFG:
     - Return value is not handled correctly or at all.
     - there is some issue with the datatype.
     - Litterals are not handled at all.
+    - Fully dynamic storage sizes.
     """
 
     def __init__(self):
@@ -146,10 +147,12 @@ class JaxprToSDFG:
         elif(any([x.isspace()  for x in argName])):
             raise ValueError(f"The name of the array, '{arg}', to create contained a space!")
         #
+
         name    = argName
         shape   = arg.aval.shape
-        strides = shape     # For now
-        offset  = None
+        offset  = None          # i.e. no offset
+        strides = None          # i.e. C-Layout
+                                # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
         dtype   = self._translateDType(arg.aval.dtype)
         self.m_sdfg.add_array(
                 name=name, shape=shape, strides=strides,
