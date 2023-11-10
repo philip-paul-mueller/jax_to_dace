@@ -13,8 +13,11 @@ class JaxprToSDFG:
     The implementation of this class does not handle the case of dynamic translation.
     It is a stateless object and all internal members are cleared at the end.
 
+    The translation handles the `return` statement in a very strange way.
+    Instead of returning it, a special argument called `_out` is generated and will be used to store the value.
+
     Todo:
-    - Return value is not handled correctly or at all.
+    - Allow fir a real return value.
     - there is some issue with the datatype.
     - Litterals are not handled at all.
     - Fully dynamic storage sizes.
@@ -84,6 +87,8 @@ class JaxprToSDFG:
             raise ValueError(f"Currently `Jaxpr` instances with literals are not supported.")
         if len(jaxpr.consts) != 0:
             raise ValueError(f"Currently `Jaxpr` instances with constants are not supported.")
+        if(len(jaxpr.out_avals) > 1):
+            raise ValueError(f"Currently only one output value is supported, but you passed {len(jaxpr.out_avals)}")
         #
 
         self.m_sdfg = dace.SDFG(name=f"jax_{id(jaxpr)}")
@@ -100,8 +105,8 @@ class JaxprToSDFG:
             self._translateEqn(jaxpr, eqn)
         #
 
-        # TODO(phimuell):
-        #  Handle the `__return` value case.
+        # Handle the output stuff
+        self._createOutputs(jaxpr)
 
         return self.m_sdfg
     #
@@ -119,7 +124,41 @@ class JaxprToSDFG:
     #
 
 
-    def _addArray(self, arg, isTransient = True):
+    def _createOutputs(self, jaxpr: ClosedJaxpr):
+        """Creates the return value statement.
+
+        However, currently it is a big fat hack, since it creates an artificial argument and copies the arguments back.
+        """
+        if(len(jaxpr.out_avals) == 0):
+            return
+        elif(len(jaxpr.out_avals) == 1):
+            pass
+        else:
+            raise ValueError(f"Expected at most one return argument, but found {len(jaxpr.out_avals)}")
+        #
+
+        # Create now the array that we use as output.
+        outVar  = jaxpr.jaxpr.outvars[0]
+        outAVal = outVar.aval
+        self._addArray(outVar, isTransient=False, altName="_out")
+
+        # This is the final state that we use
+        final_state = self.m_sdfg.add_state_after(self.m_sdfgHead, label='Final_State')
+
+        final_state.add_mapped_tasklet(
+                name="RETURN",
+                map_ranges={f'__i{dim}': f'0:{N}'  for dim, N in enumerate(outAVal.shape)},
+                inputs=dict(__in=dace.Memlet.simple(str(outVar), ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
+                code="__out = __in",
+                outputs=dict(__out=dace.Memlet.simple("_out", ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
+                external_edges=True,
+        )
+
+        return
+    # end def: _createOutput
+
+
+    def _addArray(self, arg, isTransient=True, altName=None):
         """Creates an array inside Dace for `arg` and return its name.
 
         Note that this function, by defaults creates transients.
@@ -137,7 +176,7 @@ class JaxprToSDFG:
             raise TypeError(f"Does not know how to handle {type(arg)}.")
         #
 
-        argName = str(arg)          # Ensure that we have a string.
+        argName = str(arg) if altName is None else str(altName)     # Ensure that we have a string.
         if argName in self.m_sdfg.arrays:
             raise ValueError(f"The variable `{str(arg)}` is already recorded in the SDFG.")
         if(len(argName) == 0):
