@@ -72,13 +72,13 @@ class JaxprToSDFG:
     def _initEqnTranslators(self, *args, **kwargs):
         """This function initializes all the transformers that are used inside `self`.
         """
-        from .translators import SimpleTransformator
+        from .translators import SimpleTransformator, SlicingTransformator
 
         if(self.m_eqnTranslators is not None):
             raise ValueError(f"The translators are already initialized.")
         self.m_eqnTranslators = []
 
-        for cls in [SimpleTransformator]:
+        for cls in [SimpleTransformator, SlicingTransformator]:
             self.m_eqnTranslators.append( cls(*args, **kwargs) )
         #
         return self

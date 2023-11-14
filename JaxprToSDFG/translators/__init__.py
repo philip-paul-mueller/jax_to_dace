@@ -3,4 +3,5 @@
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslatorInterface
 from .simpleTranslator                              import SimpleTransformator
+from .slicingTranslator                             import SlicingTransformator
 
