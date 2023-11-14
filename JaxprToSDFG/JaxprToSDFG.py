@@ -16,17 +16,13 @@ class JaxprToSDFG:
     - Managing the SDFG.
     - Managing the variables and keeping track of which Jax Variables belongs to which SDFG one.
 
-    However, it is unable to translate an equation, which is delegated to a translator.
+    However, it is unable to translate an equation on its own, this is delagated to a translator.
     To add one you habe to register it inside `_initEqnTranslators()`.
 
-    The translation handles the `return` statement in a very strange way.
-    Instead of returning it, a special argument called `_out` is generated and will be used to store the value.
-
     Todo:
-    - Allow fir a real return value.
-    - there is some issue with the datatype.
-    - Litterals are not handled at all.
-    - Fully dynamic storage sizes.
+        There is some issue with the datatype, see hack in `_translateDType()`.
+        Fully dynamic storage sizes, i.e. make them symbols such that DaCe can play more.
+        Fix the issue with the call signature, i.e. make it possible to use poitional arguments.
     """
 
 
@@ -196,33 +192,31 @@ class JaxprToSDFG:
 
     def _createReturnOutput(self, jaxpr: ClosedJaxpr):
         """Creates the return value statement.
-
-        However, currently it is a big fat hack, since it creates an artificial argument and copies the arguments back.
         """
-        if(len(jaxpr.out_avals) == 0):
-            return
-        elif(len(jaxpr.out_avals) == 1):
-            pass
-        else:
-            raise ValueError(f"Expected at most one return argument, but found {len(jaxpr.out_avals)}")
-        #
 
-        # Create now the array that we use as output.
-        outVar  = jaxpr.jaxpr.outvars[0]
-        outAVal = outVar.aval
-        self._addArray(outVar, isTransient=False, altName="_out")
+        # Create now the array that we use as output, these are the special `__return` / `__return_{IDX}` variables.
+        outVarMap: dict[str, str] = {}
+        for i in range(len(jaxpr.jaxpr.outvars)):
+            jaxOutVar  = jaxpr.jaxpr.outvars[i]
+            SDFGoutVar = ('__return' if len(jaxpr.jaxpr.outvars) == 1 else '__return_{}').format(i)
+            self._addArray(jaxOutVar, isTransient=False, altName=SDFGoutVar)        # Create an unmanaged output variable
+            outVarMap[str(jaxOutVar)] = SDFGoutVar
+        # end for(i):
 
-        # This is the final state that we use
+        # Now we create the return state.
         final_state = self.m_sdfg.add_state_after(self.m_sdfgHead, label='Final_State')
 
-        final_state.add_mapped_tasklet(
-                name="RETURN",
-                map_ranges={f'__i{dim}': f'0:{N}'  for dim, N in enumerate(outAVal.shape)},
-                inputs=dict(__in=dace.Memlet.simple(str(outVar), ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
-                code="__out = __in",
-                outputs=dict(__out=dace.Memlet.simple("_out", ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
-                external_edges=True,
-        )
+        for jVar, sVar in outVarMap.items():
+            jAN    = final_state.add_read(jVar)
+            sAN    = final_state.add_write(sVar)
+            shape  = self.m_sdfg.arrays[sVar].shape
+            memlet = dace.Memlet(
+                        data=jVar,
+                        subset=', '.join([f'{0}:{shape[i]}'  for i in range(len(shape))]),
+            )
+            # Now we add  the connection between them
+            final_state.add_edge(jAN, jVar, sAN, sVar, memlet)
+        #
 
         return
     # end def: _createReturnOutput
@@ -275,8 +269,8 @@ class JaxprToSDFG:
             raise ValueError(f"Currently `Jaxpr` instances with literals are not supported.")
         if len(jaxpr.consts) != 0:
             raise ValueError(f"Currently `Jaxpr` instances with constants are not supported.")
-        if(len(jaxpr.out_avals) > 1):
-            raise ValueError(f"Currently only one output value is supported, but you passed {len(jaxpr.out_avals)}")
+        if(len(jaxpr.out_avals) == 0):
+            raise ValueError(f"You have zero output variables.")
         #
 
         self.m_sdfg = dace.SDFG(name=f"jax_{id(jaxpr)}")
