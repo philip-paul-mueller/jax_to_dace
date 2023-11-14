@@ -6,12 +6,18 @@ from typing import Optional
 
 from jax._src.core import ClosedJaxpr, JaxprEqn, Jaxpr
 
+from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
+
 
 class JaxprToSDFG:
     """This is a simple class that allows to translate an `jaxpr` instance (a closed one) to an SDFG.
 
-    The implementation of this class does not handle the case of dynamic translation.
-    It is a stateless object and all internal members are cleared at the end.
+    This class should be seen as the driver, it handles tasks souch as:
+    - Managing the SDFG.
+    - Managing the variables and keeping track of which Jax Variables belongs to which SDFG one.
+
+    However, it is unable to translate an equation, which is delegated to a translator.
+    To add one you habe to register it inside `_initEqnTranslators()`.
 
     The translation handles the `return` statement in a very strange way.
     Instead of returning it, a special argument called `_out` is generated and will be used to store the value.
@@ -23,31 +29,19 @@ class JaxprToSDFG:
     - Fully dynamic storage sizes.
     """
 
+
+    ########################
+    #       Initialization
+    #
+
     def __init__(self):
         """`self` is stateless so no constructor is needed.
+
+        The transformsers are set up in `_initEqnTranslators()`.
+
         """
         # We now allocate the variables of the internal state (by calling the clear function)
         self._clearState()
-    #
-
-
-    def __call__(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """An alias for `self.transform(jaxpr)`.
-        """
-        return self.transform(jaxpr)
-    #
-
-
-    def transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """Transforms the `jaxpr` into an SDFG and returns it.
-
-        The idea of the transformation is quite simple.
-        Since Jaxpr is essentially a list of more or less simple instructions we can just loop through them and transform them, each of them translates to a single map.
-        """
-        try:
-            return self._transform(jaxpr)
-        finally:
-            self._clearState()
     #
 
 
@@ -63,94 +57,70 @@ class JaxprToSDFG:
         """
         self.m_sdfgHead: Optional[dace.SDFGState] = None
 
-        """Maps sizes (literals) to their respective symbol names in the SDFG.
-        Since SDFG has symbolic sizes but Jax has concrete sizes, we use this maping to ensure that all sizes have the same symbol.
+        """Contains all translators for JAX equations
         """
-        #self.m_shapeSizeSymbols: Optional[dict[int, str]] = None
+        self.m_eqnTranslators: Optional[list[JaxIntrinsicTranslatorInterface]] = None
+
+
+        """This is the variable map, that maps the jax name to the name that is used inside the SDFG.
+        You should not update this map directly instead use `_createInitialInputs()`, `_createReturnOutput()` or `_createJaxVariable()` that does this for you.
+        """
+        self.m_jaxNameMap: Optional[dict[str, str]] = None
     #
 
 
-    def _transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """This function does the actuall transformation, but it does not reset the internal state.
+    def _initEqnTranslators(self, *args, **kwargs):
+        """This function initializes all the transformers that are used inside `self`.
         """
-        if self.m_sdfg is not None:
-            raise RuntimeError("Expected the that `self` is in an initial state, but it does not seem to be the case.")
-        if not isinstance(jaxpr, ClosedJaxpr):
-            raise TypeError(f"Expected a `jax.core.ClosedJaxp` instance but got `{type(jaxpr)}`")
-        if len(jaxpr.effects) != 0:
-            raise ValueError(f"Currently `Jaxpr` instances with side effects are not supported.")
-        if len(jaxpr.literals) != 0:
-            raise ValueError(f"Currently `Jaxpr` instances with literals are not supported.")
-        if len(jaxpr.consts) != 0:
-            raise ValueError(f"Currently `Jaxpr` instances with constants are not supported.")
-        if(len(jaxpr.out_avals) > 1):
-            raise ValueError(f"Currently only one output value is supported, but you passed {len(jaxpr.out_avals)}")
+        from .translators import SimpleTransformator
+
+        if(self.m_eqnTranslators is not None):
+            raise ValueError(f"The translators are already initialized.")
+        self.m_eqnTranslators = []
+
+        for cls in [SimpleTransformator]:
+            self.m_eqnTranslators.append( cls(*args, **kwargs) )
         #
+        return self
+    # end def: _initEqnTranslators
 
-        self.m_sdfg = dace.SDFG(name=f"jax_{id(jaxpr)}")
 
-        # Now we create the initial state in the SDFG, which also becomes our head state.
-        self.m_sdfgHead = self.m_sdfg.add_state(label="initial_state", is_start_state=True)
 
-        # Now we are creating the inputs
-        self._createInputs(jaxpr)
 
-        # Now transforming every equation one by one.
-        for eqn in jaxpr.jaxpr.eqns:
-            self._translateEqn(jaxpr, eqn)
-        #
 
-        # Handle the output stuff
-        self._createOutputs(jaxpr)
 
-        return self.m_sdfg
+    #################################################
+    #   Translation interface
+    #
+
+    def transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
+        """Transforms the `jaxpr` into an SDFG and returns it.
+
+        The idea of the transformation is quite simple.
+        Since Jaxpr is essentially a list of more or less simple instructions we can just loop through them and transform them, each of them translates to a single map.
+        """
+        try:
+            return self._transform(jaxpr)
+        finally:
+            self._clearState()
     #
 
 
-    def _createInputs(self, jaxpr: ClosedJaxpr):
-        """Creates the initial inputs.
+    def __call__(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
+        """An alias for `self.transform(jaxpr)`.
         """
-        # We have to iterate through the non closed jaxpr, because there the names are removed.
-        for inp in jaxpr.jaxpr.invars:
-            _ = self._addArray(inp, isTransient=False)
-        #
-        return
+        return self.transform(jaxpr)
     #
 
 
-    def _createOutputs(self, jaxpr: ClosedJaxpr):
-        """Creates the return value statement.
 
-        However, currently it is a big fat hack, since it creates an artificial argument and copies the arguments back.
-        """
-        if(len(jaxpr.out_avals) == 0):
-            return
-        elif(len(jaxpr.out_avals) == 1):
-            pass
-        else:
-            raise ValueError(f"Expected at most one return argument, but found {len(jaxpr.out_avals)}")
-        #
 
-        # Create now the array that we use as output.
-        outVar  = jaxpr.jaxpr.outvars[0]
-        outAVal = outVar.aval
-        self._addArray(outVar, isTransient=False, altName="_out")
 
-        # This is the final state that we use
-        final_state = self.m_sdfg.add_state_after(self.m_sdfgHead, label='Final_State')
 
-        final_state.add_mapped_tasklet(
-                name="RETURN",
-                map_ranges={f'__i{dim}': f'0:{N}'  for dim, N in enumerate(outAVal.shape)},
-                inputs=dict(__in=dace.Memlet.simple(str(outVar), ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
-                code="__out = __in",
-                outputs=dict(__out=dace.Memlet.simple("_out", ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
-                external_edges=True,
-        )
 
-        return
-    # end def: _createOutput
-
+    ##########################################
+    #   Variable Management
+    #
 
     def _addArray(self, arg, isTransient=True, altName=None):
         """Creates an array inside Dace for `arg` and return its name.
@@ -161,6 +131,10 @@ class JaxprToSDFG:
         Args:
             arg:            The Jax object that should be maped to dace.
             isTransient:    If a transent should be created, by default.
+
+        Notes:
+            This function does not update the internal variable map, thus you should not use it.
+                Instead you should use `_createInitialInputs()`, `_createReturnOutput()`, `_createJaxVariable()` or `_createJaxVarList()`, that updates the map.
         """
         if isinstance(arg, jax._src.core.Var):
             pass
@@ -196,6 +170,138 @@ class JaxprToSDFG:
     # end def: _addArray
 
 
+    def _createInitialInputs(self, jaxpr: ClosedJaxpr):
+        """Creates the initial inputs, i.e. arguments to the jax expression.
+
+        The function will update the internal variable map.
+
+        There is no function to create the inputs for the indivisual equations, since:
+        - they are either initial input
+        - literals
+        - former outputs of some equations.
+        """
+
+        if(self.m_jaxNameMap is None):          # Ensure that the name map is active.
+            self.m_jaxNameMap = dict()
+        #
+
+        # We have to iterate through the non closed jaxpr, because there the names are removed.
+        for inp in jaxpr.jaxpr.invars:
+            name = self._addArray(inp, isTransient=False)
+            self.m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
+        #
+        return
+    #
+
+
+    def _createReturnOutput(self, jaxpr: ClosedJaxpr):
+        """Creates the return value statement.
+
+        However, currently it is a big fat hack, since it creates an artificial argument and copies the arguments back.
+        """
+        if(len(jaxpr.out_avals) == 0):
+            return
+        elif(len(jaxpr.out_avals) == 1):
+            pass
+        else:
+            raise ValueError(f"Expected at most one return argument, but found {len(jaxpr.out_avals)}")
+        #
+
+        # Create now the array that we use as output.
+        outVar  = jaxpr.jaxpr.outvars[0]
+        outAVal = outVar.aval
+        self._addArray(outVar, isTransient=False, altName="_out")
+
+        # This is the final state that we use
+        final_state = self.m_sdfg.add_state_after(self.m_sdfgHead, label='Final_State')
+
+        final_state.add_mapped_tasklet(
+                name="RETURN",
+                map_ranges={f'__i{dim}': f'0:{N}'  for dim, N in enumerate(outAVal.shape)},
+                inputs=dict(__in=dace.Memlet.simple(str(outVar), ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
+                code="__out = __in",
+                outputs=dict(__out=dace.Memlet.simple("_out", ", ".join([f'__i{dim}'  for dim in range(len(outAVal.shape))]))),
+                external_edges=True,
+        )
+
+        return
+    # end def: _createReturnOutput
+
+
+    def _createJaxVarList(self, jaxVarList):
+        """This function creates the listed jax variables and returns the SDFG names as a list.
+
+        Expected input arguments are `JaxprEqn.invars` or `JaxprEqn.outvars`.
+        The function will iterate through the list and return a `list` each element referes to the correspomnding SDFG variable.
+        This is either a string or `None` if the variable is a literal.
+        If the variable does not exists yet it will be created.
+        """
+        assert self.m_jaxNameMap is not None, "The variable map is not initialized."
+
+        retList = []
+        for var in jaxVarList:
+            if isinstance(var, jax._src.core.Literal):
+                retList.append(None)        # There is no SDFG variable for this 
+            elif isinstance(var, jax._src.core.Var):
+                if(str(var) in self.m_jaxNameMap):                      # The variable is known, so we just return the SDFG name.
+                    retList.append( self.m_jaxNameMap[str(var)] )
+                else:
+                    retList.append( self._addArray(var) )               # The variable is not known, so we have to create it
+                    self.m_jaxNameMap[str(var)] = retList[-1]           #  and add it to the mapping.
+            else:
+                raise ValueError(f"The translation process is not implemented for '{type(var)}'")
+            #
+        # end for(var):
+        return retList
+    # end def: _createJaxVarList
+
+
+
+
+    ####################################
+    #   Internal Translation Routines
+    #
+
+    def _transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
+        """This function does the actuall transformation, but it does not reset the internal state.
+        """
+        if self.m_sdfg is not None:
+            raise RuntimeError("Expected the that `self` is in an initial state, but it does not seem to be the case.")
+        if not isinstance(jaxpr, ClosedJaxpr):
+            raise TypeError(f"Expected a `jax.core.ClosedJaxp` instance but got `{type(jaxpr)}`")
+        if len(jaxpr.effects) != 0:
+            raise ValueError(f"Currently `Jaxpr` instances with side effects are not supported.")
+        if len(jaxpr.literals) != 0:
+            raise ValueError(f"Currently `Jaxpr` instances with literals are not supported.")
+        if len(jaxpr.consts) != 0:
+            raise ValueError(f"Currently `Jaxpr` instances with constants are not supported.")
+        if(len(jaxpr.out_avals) > 1):
+            raise ValueError(f"Currently only one output value is supported, but you passed {len(jaxpr.out_avals)}")
+        #
+
+        self.m_sdfg = dace.SDFG(name=f"jax_{id(jaxpr)}")
+
+        # Now we create the initial state in the SDFG, which also becomes our head state.
+        self.m_sdfgHead = self.m_sdfg.add_state(label="initial_state", is_start_state=True)
+
+        # Create the translators
+        self._initEqnTranslators()
+
+        # Now we are creating the initial inputs, i.e. the ones that are named in the closure and are the arguments.
+        self._createInitialInputs(jaxpr)
+
+        # Now transforming every equation one by one.
+        for eqn in jaxpr.jaxpr.eqns:
+            self._translateEqn(jaxpr, eqn)
+        #
+
+        # Handle the output stuff
+        self._createReturnOutput(jaxpr)
+
+        return self.m_sdfg
+    # end def: transform
+
+
     def _translateEqn(self,
             closedJaxp: ClosedJaxpr,
             eqn: JaxprEqn,
@@ -217,19 +323,20 @@ class JaxprToSDFG:
         # Inside this state we will add everything that is related to this equation.
         eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
 
-        # Now we create the variables for the output arrays
-        outVars = []
-        for out in eqn.outvars:
-            outVar = self._addArray(out)
-            outVars.append(outVar)
-        #
-        pName = eqn.primitive.name
+        # We now create the name list for the variables
+        inVarNames  = self._createJaxVarList(eqn.invars )
+        outVarNames = self._createJaxVarList(eqn.outvars)
 
-        if pName == "__my_special_name":
-            raise NotImplementedError(f"Does not know how to handle primitive '{pName}'.")
+        # Now we look for the translator that can handle the primitive
+        for eqnTranslator in self.m_eqnTranslators:
+            if(eqnTranslator.canHandle(self, eqn)):
+                break   # We have found it
         else:
-            self._handleSimpleCase(closedJaxp=closedJaxp, eqn=eqn, eqnState=eqnState, outVars=outVars)
+            raise NotImplementedError(f"Does not know how to handle primitive '{eqn.primitive.name}'.")
         #
+
+        # Now we call the translation
+        eqnTranslator.translateEqn(self, inVarNames, outVarNames, eqn, eqnState)
 
         # The head has changed
         self.m_sdfgHead = eqnState
@@ -238,86 +345,27 @@ class JaxprToSDFG:
     # end def: _translateEqn
 
 
-    def _handleSimpleCase(self,
-            closedJaxp: ClosedJaxpr,
-            eqn: JaxprEqn,
-            eqnState: dace.SDFGState,
-            outVars: list[str],
 
-    ):
-        """This function handles the most simple cases, where basically a mapped tasklet can be used for the translation.
 
-        Args:
-            closedJaxp:         The `Jaxpr` closed variable, i.e. the object that should be translated.
-            eqn:                The equation (statement) that is currently translated.
-            eqnState:           The `SDFGState` into which we will generate the translated version.
-            outVars:            List of all arrays into which we write the result.
 
-        This function assumes the following:
-        - Simple arethmetic operation `+`, `-`, `*`, `/` or `-` (unary).
-        - Mathematicla operation, such as `sin`, `cos`, ...
-        - One single output parameter.
-        - Essentially an element whise operation, thus shape of input equal the one of the output.
+    ##################################
+    #   Getter
+    #
+
+    def getSDFG(self):
+        """Returns the SDFG of self.
         """
+        assert self.m_sdfg is not None, "The SDFG object is `None` are you sure that the translation is active."
+        return self.m_sdfg
+    # end def: getSDFG
 
-        if(not (1 <= len(eqn.invars) <= 2)):
-            raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
-        if(len(eqn.outvars) != 1):
-            raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
-        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))])):
-           raise ValueError(f"Expected that the input arguments have the same shape.")
-        if(eqn.invars[0].aval.shape != eqn.outvars[0].aval.shape):
-           raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
-        assert all([outVar in self.m_sdfg.arrays  for outVar in outVars])
 
-        unarryOps = {
-                "???": "__out = +(__in0)",
-                "??": "__out = -(__in0)",
-                "sin":      "__out = sin(__in0)",
-                "cos":      "__out = cos(__in0)",
-        }
-        binarryOps = {
-                "add":      "__out = (__in0)+(__in1)",
-                "sub":      "__out = (__in0)-(__in1)",
-                "mul":      "__out = (__in0)*(__in1)",
-                "div":      "__out = (__in0)/(__in1)",
-                "pow":      "__out = (__in0)**(__in1)",
-        }
 
-        # We will now create a mapped tasklet that will do all the calculations.
-        tName = eqn.primitive.name
-        tMapRanges = {f'__i{dim}': f'0:{N}'  for dim, N in enumerate(eqn.invars[0].aval.shape)}
 
-        tInpNames = [ str(x)  for x in eqn.invars ]
-        tInputs = {}
-        for inputI in range(len(eqn.invars)):
-            tInputs[f'__in{inputI}'] = dace.Memlet.simple(tInpNames[inputI], ", ".join([f'__i{dim}'  for dim in range(len(eqn.invars[inputI].aval.shape))]))
-        #
 
-        tCode = None
-        for M in [unarryOps, binarryOps]:
-            if(tName in M):
-                tCode = M[tName]
-                break
-        else:
-            raise ValueError(f"Does not know how to translate primitive '{tName}'")
-        #
-
-        tOutName = str(eqn.outvars[0])
-        tOutputs = dict(__out=dace.Memlet.simple(tOutName, ', '.join([f'__i{dim}'  for dim in range(len(eqn.outvars[0].aval.shape))])))
-
-        eqnState.add_mapped_tasklet(
-                name=tName,
-                map_ranges=tMapRanges,
-                inputs=tInputs,
-                code=tCode,
-                outputs=tOutputs,
-                external_edges=True,
-        )
-
-        return self
-    # end def: _handleSimpleCase
-
+    ##################################
+    #   Static Methods
+    #
 
     @staticmethod
     def _translateDType(dtype):
