@@ -313,12 +313,10 @@ class JaxprToSDFG:
         This function will also modify the current head.
         """
         assert isinstance(eqn, jax._src.core.JaxprEqn)
-        assert all([str(out) not in self.m_sdfg.arrays  for out in eqn.outvars])
-        assert all([str(inp)     in self.m_sdfg.arrays  for inp in eqn.invars ]), f"Expected to find input '{[ str(inp)  for inp in eqn.invars if str(inp) not in self.m_sdfg.arrays]}'"
-        assert len(eqn.invars)  >  0
-        assert len(eqn.outvars) == 1, f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}"
-        assert all([eqn.outvars[0].aval.shape == inp.aval.shape  for inp in eqn.invars]), f"Found different shapes."
-        assert len(eqn.effects) == 0
+        assert len(eqn.invars)  >  0, "Expected to find at least one input variable."
+        assert len(eqn.outvars) >= 1, f"Expected to find at least one output variable for equation '{str(eqn)}' but it had {len(eqn.outvars)}"
+        assert all([str(out) not in self.m_jaxNameMap  for out in eqn.outvars]), f"The outputs {[str(out)  for out in eqn.outvars if str(out) in self.m_jaxNameMap]} were already created."
+        assert len(eqn.effects) == 0, "This class can only handle siode efect free equations."
 
         # Inside this state we will add everything that is related to this equation.
         eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')

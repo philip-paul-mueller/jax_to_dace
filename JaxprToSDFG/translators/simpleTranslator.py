@@ -80,12 +80,19 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
         if(len(eqn.outvars) != 1):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
-        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))])):
-           raise ValueError(f"Expected that the input arguments have the same shape.")
-        if(eqn.invars[0].aval.shape != eqn.outvars[0].aval.shape):
-           raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
+        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
+           raise ValueError(f"Expected that all the input arguments have the same shape.")
+        if(len([isinstance(inVarNames[i], str)  for i in range(len(inVarNames))]) == 0):
+            raise ValueError(f"Only passed lterals.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
+        if([eqn.invars[i]  for i in range(len(inVarNames)) if inVarNames[i] is not None][0].aval.shape != eqn.outvars[0].aval.shape):
+           raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
+        if(len(eqn.effects) != 0):
+            raise ValueError(f"Can only handle equations without any side effects.")
+        if(len(eqn.params) != 0):
+            raise ValueError(f"Can only handle quations without any parameters.")
+        #
 
         # We will now create a mapped tasklet that will do all the calculations.
         tName = eqn.primitive.name
