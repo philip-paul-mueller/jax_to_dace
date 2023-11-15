@@ -51,6 +51,9 @@ class JaxIntrinsicTranslatorInterface:
         This function is called after the translator has created named variables, i.e. arrays, for the inputs and the outputs.
         The names are stored inside the `inVarNames` and `outVarNames`, respectively, which may be `None`.
 
+        Returns:
+            The function returns the last equation state, i.e. the value that will be passed as `eqnState` to the next translation.
+
         Args:
             translator:     The `JaxprToSDFG` instance that is respnsible for the translation.
             inVarNames:     List of the names of the arrays created inside the SDFG for the inpts.
@@ -62,6 +65,8 @@ class JaxIntrinsicTranslatorInterface:
             The `{in,out}VarNames` have the same order as `eqn.{in,out}vars`.
             It is possible that `inVarNames` are `None` which means that the argument is a scalar literal that was not created inside the literal.
                 `outVarNames` will never contain `None` values.
+            Returning the `eqnState` allows the function to modify, i.e. add more states, as just one state.
+                In previous versions this was not requiered, as a compability feature if `None` is returned it is assumed that `eqnState` is returned.
         """
         raise NotImplementedError("You have to implement this function.")
     # end def: translateEqn

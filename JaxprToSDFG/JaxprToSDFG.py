@@ -342,10 +342,17 @@ class JaxprToSDFG:
         #
 
         # Now we call the translation
-        eqnTranslator.translateEqn(self, inVarNames, outVarNames, eqn, eqnState)
+        newSDFGHead = eqnTranslator.translateEqn(self, inVarNames, outVarNames, eqn, eqnState)
 
+        if(newSDFGHead is None):
+            newSDFGHead = eqnState
+        elif(isinstance(newSDFGHead, dace.SDFGState)):
+            pass
+        else:
+            raise TypeError(f"Encountered illegal types '{type(newSDFGHead)}'")
+        #
         # The head has changed
-        self.m_sdfgHead = eqnState
+        self.m_sdfgHead = newSDFGHead
 
         return self
     # end def: _translateEqn
