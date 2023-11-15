@@ -159,10 +159,15 @@ class JaxprToSDFG:
         strides = None          # i.e. C-Layout
                                 # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
         dtype   = self._translateDType(arg.aval.dtype)
-        self.m_sdfg.add_array(
-                name=name, shape=shape, strides=strides,
-                offset=offset, dtype=dtype, transient=isTransient
-        )
+
+        if(shape == ()):
+            self.m_sdfg.add_scalar(name=name, dtype=dtype, transient=isTransient)
+        else:
+            self.m_sdfg.add_array(
+                    name=name, shape=shape, strides=strides,
+                    offset=offset, dtype=dtype, transient=isTransient
+            )
+        #
         assert name in self.m_sdfg.arrays
         return name
     # end def: _addArray
