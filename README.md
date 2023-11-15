@@ -18,7 +18,6 @@ To register a new translator add it to `JaxprToSDFG._initEqnTranslators()`.
 There are some todos, use `grep -i todo` to get an overview.
 
 More global ones are:
-- Fix the call signature (currently we have to use `kwargs` instead of positional ones).
 - Fix the error with the type deduction, see `JaxprToSDFG._translateDType()`
 
 

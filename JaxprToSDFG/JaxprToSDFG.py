@@ -174,14 +174,19 @@ class JaxprToSDFG:
         - literals
         - former outputs of some equations.
         """
-
         if(self.m_jaxNameMap is None):          # Ensure that the name map is active.
             self.m_jaxNameMap = dict()
+        if(not isinstance(self.m_sdfg, dace.SDFG)):
+            raise TypeError(f"The internal SDFG object is not an SDFG but '{type(self.m_sdfg)}'")
+        if(len(self.m_sdfg.arg_names) != 0):
+            raise ValueError(f"Expected that the argument list of the SDFG is empty but it already contains: {self.m_sdfg.arg_names}")
         #
 
         # We have to iterate through the non closed jaxpr, because there the names are removed.
+        self.m_sdfg.arg_names = []
         for inp in jaxpr.jaxpr.invars:
             name = self._addArray(inp, isTransient=False)
+            self.m_sdfg.arg_names.append(name)
             self.m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
         #
         return
