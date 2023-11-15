@@ -20,9 +20,7 @@ class JaxprToSDFG:
     To add one you habe to register it inside modul constant `translators.ALL_TRAFOS`.
 
     Todo:
-        There is some issue with the datatype, see hack in `_translateDType()`.
-        Fully dynamic storage sizes, i.e. make them symbols such that DaCe can play more.
-        Fix the issue with the call signature, i.e. make it possible to use poitional arguments.
+        Fully dynamic storage sizes or just the strides(?), i.e. make them symbols such that DaCe can play more.
     """
 
 
