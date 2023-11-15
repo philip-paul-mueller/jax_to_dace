@@ -5,7 +5,7 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorIn
 
 from jax._src.core import JaxprEqn
 import dace
-from typing import Union
+from typing import Union, Any
 
 
 class SimpleTransformator(JaxIntrinsicTranslatorInterface):
@@ -82,17 +82,16 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
     # end def: canHandle
 
 
-    def translateEqn(self,
+    def translateEqn(self, 
                      translator,
                      inVarNames: list[Union[str, None]],
                      outVarNames: list[str],
                      eqn: JaxprEqn,
                      eqnState: dace.SDFGState,
     ):
-        """Translate eqn into an SDFG that is created inside `eqnState`.
+        """Translate a Jax-Equation into an equivalent SDFG that is created inside `eqnState`.
 
-        Essentially this is a wrapper arround `add_mapped_tasklet()`.
-        This function is able to handle `None` values inside `inVarNames` if they are scalars.
+        Depending if a scalar or an array is handled either a mapped tasklet or a normal tasklet is created.
 
         Args:
             translator:     The `JaxprToSDFG` instance that is respnsible for the translation.
@@ -120,22 +119,92 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Can only handle quations without any parameters.")
         #
 
-        # We will now create a mapped tasklet that will do all the calculations.
-        tName = eqn.primitive.name
-        tMapRanges = {f'__i{dim}': f'0:{N}'  for dim, N in enumerate(eqn.invars[0].aval.shape)}
+        # This works because we requiere that all non literal in/outputs have the same shape
+        is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
 
-        # Creates the input connectors and the associated memlets
-        tInputs = {}
-        for i in range(len(eqn.invars)):
-            if(inVarNames[i] is None):  continue        # If the input is a literal, then we do not have to create a memlet.
-            tInputs[f'__in{i}'] = dace.Memlet.simple(inVarNames[i], ", ".join([f'__i{dim}'  for dim in range(len(eqn.invars[i].aval.shape))]))
+        # We only need a map range if we are not scalar
+        if(not is_scalar):
+            tMapRanges = [ (f'__i{dim}', f'0:{N}')  for dim, N in enumerate(eqn.invars[0].aval.shape) ]
         #
-        if(len(tInputs) == 0):
+
+        tInputs = []
+        for i in range(len(eqn.invars)):
+            if(inVarNames[i] is None):  # Input is a literal, so no data is needed.
+                tInputs.append((None, None))        # the two `None`s are for the connector name and the memlet, they simplyfy coding bellow.
+                continue
+            #
+
+            # Depending if we have a scalar or not create another memlet, they differ in what they transport
+            #  The scalar one moves all, i.e. a single element and the array one is the usual map thing that iterates through everything.
+            if(is_scalar):  iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
+            else:           iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
+            tInputs.append( (f'__in{i}', iMemlet) )
+        #
+        if(all(x is None  for x, y in tInputs)):
             raise ValueError(f"Found only literals, which is currently not supported.")
         #
 
-        # Now we generate the code that we will feed into the tasklet afterwards
-        #  We do not handle literals yet.
+        # Generate the tasklet code
+        tCode = self._writeTaskletCode(inVarNames, eqn)
+
+        # As above we will now create output memlets, they follow the same logic.
+        tOutputs = []
+        for i in range(len(outVarNames)):
+            if(is_scalar): tOutputs.append( (f'__out{i}', dace.Memlet.from_array(outVarNames[i], translator.getSDFG().arrays[outVarNames[i]])) )
+            else:          tOutputs.append( (f'__out{i}', dace.Memlet.simple(outVarNames[i], ', '.join([X[0]  for X in tMapRanges]))) )
+        #
+
+        # This is the name of the tasklet and the name of the 
+        tName = eqn.primitive.name
+
+        if(is_scalar):
+            # This creates the tasklet, but we have to establish the connections
+            tTasklet = eqnState.add_tasklet(tName, self._listToDict(tInputs).keys(), self._listToDict(tOutputs).keys(), tCode)
+
+            for iVar, (iConnName, iMemlet)  in filter(lambda X: X[0] is not None, zip(inVarNames, tInputs)):
+                inp = eqnState.add_read(iVar)
+                eqnState.add_edge(inp, None, tTasklet, iConnName, iMemlet)
+            for oVar, (oConnName, oMemlet) in zip(outVarNames, tOutputs):
+                out = eqnState.add_write(oVar)
+                eqnState.add_edge(tTasklet, oConnName, out, None, oMemlet)
+        else:
+            eqnState.add_mapped_tasklet(
+                name=tName,
+                map_ranges=self._listToDict(tMapRanges),
+                inputs=self._listToDict(tInputs),
+                code=tCode,
+                outputs=self._listToDict(tOutputs),
+                external_edges=True,
+            )
+        #
+
+        return eqnState
+    # end def: _translateEqn_Array
+
+
+
+    @staticmethod
+    def _listToDict(inp: list[Union[tuple[None, Any], tuple[Any, Any]]]) -> dict[Any, Any]:
+        """This method turns a list of pairs into a `dict`.
+
+        However the function will filter out all entries where the key is `None`.
+        """
+        return {k:v  for k, v in inp if k is not None}
+    # end def: _listToDict
+
+
+    def _writeTaskletCode(
+            self,
+            inVarNames: list[Union[str, None]],
+            eqn: JaxprEqn,
+    ):
+        """This function generates the tasklet code based on a primitive.
+
+        The function will also handle literal substitution.
+        """
+
+        # Look for the template of the tasklet code.
+        tName = eqn.primitive.name
         for M in [self.m_unarryOps, self.m_binarryOps]:
             if(tName in M):
                 tCode = M[tName]
@@ -155,24 +224,8 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
                 raise ValueError(f"Can not handle the literal case of shape: {jaxInVar.aval.shape}")
         # end for(i):
 
-        # Now create the output connector (`__out`) and the memlet
-        tOutputs = {}
-        for i in range(len(outVarNames)):
-            tOutputs[f'__out{i}'] = dace.Memlet.simple(outVarNames[i], ', '.join([f'__i{dim}'  for dim in range(len(eqn.outvars[i].aval.shape))]))
-        #
-
-        eqnState.add_mapped_tasklet(
-                name=tName,
-                map_ranges=tMapRanges,
-                inputs=tInputs,
-                code=tCode,
-                outputs=tOutputs,
-                external_edges=True,
-        )
-
-        return eqnState
-    # end def: translateEqn
-
+        return tCode
+    # end def: _writeTaskletCode
 # end class(SimpleTransformator):
 
 
