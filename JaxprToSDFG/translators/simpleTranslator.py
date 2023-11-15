@@ -170,7 +170,7 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
                 external_edges=True,
         )
 
-        return self
+        return eqnState
     # end def: translateEqn
 
 # end class(SimpleTransformator):
