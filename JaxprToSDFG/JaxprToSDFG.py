@@ -120,15 +120,18 @@ class JaxprToSDFG:
     #   Variable Management
     #
 
-    def _addArray(self, arg, isTransient=True, altName=None):
+    def _addArray(self, arg, isTransient=True, altName=None, forceArray = False):
         """Creates an array inside Dace for `arg` and return its name.
 
         Note that this function, by defaults creates transients.
         This is different from the `add_array()` function of DaCe.
+        This function also distinguishes between `Scalar`s (empty shape) and `Array`s (the rest).
+        However, by setting `forceArray` to `True` the function will turn a `Scalar` into a one element `Array`.
 
         Args:
             arg:            The Jax object that should be maped to dace.
             isTransient:    If a transent should be created, by default.
+            forceArray:     Turn scalar in one element arrays.
 
         Notes:
             This function does not update the internal variable map, thus you should not use it.
@@ -153,14 +156,19 @@ class JaxprToSDFG:
             raise ValueError(f"The name of the array, '{arg}', to create contained a space!")
         #
 
-        name    = argName
-        shape   = arg.aval.shape
-        offset  = None          # i.e. no offset
-        strides = None          # i.e. C-Layout
-                                # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
-        dtype   = self._translateDType(arg.aval.dtype)
+        name      = argName
+        shape     = arg.aval.shape          # Shape of the array
+        offset    = None                    # i.e. no offset
+        strides   = None                    # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
+        is_scalar = (shape == ())
+        dtype     = self._translateDType(arg.aval.dtype)
 
-        if(shape == ()):
+        if(is_scalar and forceArray):       # "cast" the argument to an array.
+            shape     = (1, )
+            is_scalar = False
+        #
+
+        if(is_scalar):
             self.m_sdfg.add_scalar(name=name, dtype=dtype, transient=isTransient)
         else:
             self.m_sdfg.add_array(
@@ -206,12 +214,17 @@ class JaxprToSDFG:
         """Creates the return value statement.
         """
 
-        # Create now the array that we use as output, these are the special `__return` / `__return_{IDX}` variables.
+        # Create now the arrays that we use as output, these are the special `__return` / `__return_{IDX}` variables.
         outVarMap: dict[str, str] = {}
         for i in range(len(jaxpr.jaxpr.outvars)):
-            jaxOutVar  = jaxpr.jaxpr.outvars[i]
-            SDFGoutVar = ('__return' if len(jaxpr.jaxpr.outvars) == 1 else '__return_{}').format(i)
-            self._addArray(jaxOutVar, isTransient=False, altName=SDFGoutVar)        # Create an unmanaged output variable
+            jaxOutVar  = jaxpr.jaxpr.outvars[i]                                                         # Name of the variable inside jax/SDFG
+            SDFGoutVar = ('__return' if len(jaxpr.jaxpr.outvars) == 1 else '__return_{}').format(i)     # This name will mark it as a return value.
+
+            # Create an output array that has the same shape as `jaxOutVar` but with name `SDFGoutVar`.
+            #  We have to force the creation of a container (otherwhise the code generator will safe the result in a pass by value argument).
+            _ = self._addArray(jaxOutVar, isTransient=False, altName=SDFGoutVar, forceArray=True)
+
+            assert _ == SDFGoutVar
             outVarMap[str(jaxOutVar)] = SDFGoutVar
         # end for(i):
 
@@ -221,13 +234,8 @@ class JaxprToSDFG:
         for jVar, sVar in outVarMap.items():
             jAN    = final_state.add_read(jVar)
             sAN    = final_state.add_write(sVar)
-            shape  = self.m_sdfg.arrays[sVar].shape
-            memlet = dace.Memlet(
-                        data=jVar,
-                        subset=', '.join([f'{0}:{shape[i]}'  for i in range(len(shape))]),
-            )
-            # Now we add  the connection between them
-            final_state.add_edge(jAN, jVar, sAN, sVar, memlet)
+            memlet = dace.Memlet.from_array(sVar, self.getArray(jVar))
+            final_state.add_edge(jAN, None, sAN, None, memlet)                      # Now we add  the connection between them
         #
 
         return
@@ -390,6 +398,15 @@ class JaxprToSDFG:
         assert self.m_sdfg is not None, "The SDFG object is `None` are you sure that the translation is active."
         return self.m_sdfg
     # end def: getSDFG
+
+
+    def getArray(self, name):
+        """Return the array `name` inside `self`.
+
+        Effectively a shorthand of `self.getSDFG().arrays[name]`.
+        """
+        return self.m_sdfg.arrays[name]
+    # end def: getArray
 
 
 
