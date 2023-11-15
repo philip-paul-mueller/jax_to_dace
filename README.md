@@ -19,7 +19,6 @@ There are some todos, use `grep -i todo` to get an overview.
 
 More global ones are:
 - Fix the call signature (currently we have to use `kwargs` instead of positional ones).
-- Add constants (Philip)
 - Fix the error with the type deduction, see `JaxprToSDFG._translateDType()`
 
 

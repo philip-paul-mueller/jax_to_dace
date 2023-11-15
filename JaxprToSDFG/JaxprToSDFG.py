@@ -220,6 +220,21 @@ class JaxprToSDFG:
     # end def: _createReturnOutput
 
 
+    def _createConstants(self, jaxpr: ClosedJaxpr):
+        """This function creates the constants, that are named in the closure.
+        """
+        from copy import deepcopy
+        assert self.m_jaxNameMap is not None
+
+        # Interestingly the values and the names of the constants are kind of separated
+        for cName, cValue in zip(jaxpr.jaxpr.constvars, jaxpr.consts):
+            self.m_sdfg.add_constant(str(cName), deepcopy(cValue))
+            self.m_jaxNameMap[cName] = cName
+        #
+        return
+    # end def: _createConstants
+
+
     def _createJaxVarList(self, jaxVarList):
         """This function creates the listed jax variables and returns the SDFG names as a list.
 
@@ -263,10 +278,6 @@ class JaxprToSDFG:
             raise TypeError(f"Expected a `jax.core.ClosedJaxp` instance but got `{type(jaxpr)}`")
         if len(jaxpr.effects) != 0:
             raise ValueError(f"Currently `Jaxpr` instances with side effects are not supported.")
-        if len(jaxpr.literals) != 0:
-            raise ValueError(f"Currently `Jaxpr` instances with literals are not supported.")
-        if len(jaxpr.consts) != 0:
-            raise ValueError(f"Currently `Jaxpr` instances with constants are not supported.")
         if(len(jaxpr.out_avals) == 0):
             raise ValueError(f"You have zero output variables.")
         #
@@ -281,6 +292,11 @@ class JaxprToSDFG:
 
         # Now we are creating the initial inputs, i.e. the ones that are named in the closure and are the arguments.
         self._createInitialInputs(jaxpr)
+
+        # Now we are creating the constants.
+        if len(jaxpr.consts) != 0:
+            self._createConstants(jaxpr)
+        #
 
         # Now transforming every equation one by one.
         for eqn in jaxpr.jaxpr.eqns:
