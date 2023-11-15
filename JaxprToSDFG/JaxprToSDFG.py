@@ -93,10 +93,14 @@ class JaxprToSDFG:
         The idea of the transformation is quite simple.
         Since Jaxpr is essentially a list of more or less simple instructions we can just loop through them and transform them, each of them translates to a single map.
         """
+        old64BitValue = jax.config.read("jax_enable_x64")       # It seams that there is no context manager for this (at least not a documented one).
         try:
-            return self._transform(jaxpr)
+            jax.config.update("jax_enable_x64", True)           # Esnures that 64Bits are enabled this is what DaCe is implicitly assuming.
+            return self._transform(jaxpr)                       #  However, it would make more sense to check that during the creation of the jaxpr.
         finally:
             self._clearState()
+            jax.config.update("jax_enable_x64", old64BitValue)
+        #
     #
 
 
@@ -276,6 +280,9 @@ class JaxprToSDFG:
 
     def _transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
         """This function does the actuall transformation, but it does not reset the internal state.
+
+        You should not use this function directly, instead you should always call `self.transform()`.
+        The reason is that `self.transform()` prepares the internal state of `self`.
         """
         if self.m_sdfg is not None:
             raise RuntimeError("Expected the that `self` is in an initial state, but it does not seem to be the case.")
@@ -285,6 +292,8 @@ class JaxprToSDFG:
             raise ValueError(f"Currently `Jaxpr` instances with side effects are not supported.")
         if(len(jaxpr.out_avals) == 0):
             raise ValueError(f"You have zero output variables.")
+        if(not jax.config.read("jax_enable_x64")):
+            raise ValueError(f"The translation only works if `jax_enable_x64` is enabled. Do it manually or use `self.transform()`!")
         #
 
         self.m_sdfg = dace.SDFG(name=f"jax_{id(jaxpr)}")
@@ -382,16 +391,31 @@ class JaxprToSDFG:
 
 
     ##################################
-    #   Static Methods
+    #   Misc
     #
 
-    @staticmethod
     def _translateDType(dtype):
-        """Translate some special interest dtypes into others more usefull types.
+        """Translates the Jax datatypes into the ones used by DaCe.
         """
-        # TODO(phimuell):
-        #  Why does `return dtype` does not work it is essentially `arg.aval.dtype`?
-        return np.float64
+        nameofDType = str(dtype)
+
+        # Make some basic checks if the datatype is okay
+        if((not jax.config.read("jax_enable_x64")) and (nameofDType == 'float64')):
+            raise ValueError(f"Found a `float64` type but `x64` support is disabled.")
+        if(nameofDType.startswith('complex')):
+            raise NotImplementedError(f"Support for complecx computation is not implemented.")
+        #
+
+        # Now extract the datatype from dace, this is extremly ugly.
+        if(not hasattr(dace.dtypes, nameofDType)):
+            raise TypeError(f"Could not find the type `{nameofDType}` ({type(dtype)}) in `dace.dtypes`.")
+        dcDType = getattr(dace.dtypes, nameofDType)
+
+        if(not isinstance(dcDType, dace.dtypes.typeclass)):
+            raise TypeError(f"Expected that `{nameofDType}` would map to a `dace.typeclass` but it mapped to a `{type(dcDType)}`.")
+        #
+
+        return dcDType
     # end def: _translateDType
 
 # end class(JaxprToSDFG):

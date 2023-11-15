@@ -17,9 +17,6 @@ To register a new translator add it to `JaxprToSDFG._initEqnTranslators()`.
 ## Todos
 There are some todos, use `grep -i todo` to get an overview.
 
-More global ones are:
-- Fix the error with the type deduction, see `JaxprToSDFG._translateDType()`
-
 
 ### Lists of Intrinsics
 Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/JaxDecompiler/blob/main/src/JaxDecompiler/primitive_mapping.py`:
