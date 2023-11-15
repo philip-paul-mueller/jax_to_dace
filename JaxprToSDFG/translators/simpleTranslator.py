@@ -14,6 +14,8 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
     Examples for simple operations are:
     - Arethmetic operations.
     - Mathematical Functions.
+
+    However, `reducing` operations are not included, such as `numpy.amin`.
     """
     __slots__ = ("m_unarryOps", "m_binarryOps")
 
@@ -25,17 +27,41 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
         # We will now create maps, that maps the name of a primitive to a certain tasklet code.
         self.m_unarryOps = {
-                "???":      "__out0 = +(__in0)",
-                "??":       "__out0 = -(__in0)",
+                "pos":      "__out0 = +(__in0)",
+                "neg":       "__out0 = -(__in0)",
+
+                "floor":    "__out0 = floor(__in0)",
+                "ceil":     "__out0 = ceil(__in0)",
+                "round":    "__out0 = round(__in0)",
+                "abs":      "__out0 = abs(__in0)",
+                "sign":     "__out0 = sign(__in0)",
+
+                "sqrt":     "__out0 = sqrt(__in0)",
+
+                "log":      "__out0 = log(__in0)",
+                "exp":      "__out0 = exp(__in0)",
+
                 "sin":      "__out0 = sin(__in0)",
+                "asin":     "__out0 = asin(__in0)",
                 "cos":      "__out0 = cos(__in0)",
+                "acos":     "__out0 = acos(__in0)",
+                "tan":      "__out0 = tan(__in0)",
+                "atan":     "__out0 = atan(__in0)",
+                "tanh":     "__out0 = tanh(__in0)",
         }
         self.m_binarryOps = {
                 "add":      "__out0 = (__in0)+(__in1)",
                 "sub":      "__out0 = (__in0)-(__in1)",
                 "mul":      "__out0 = (__in0)*(__in1)",
                 "div":      "__out0 = (__in0)/(__in1)",
+
+                "rem":      "__out0 = (__in0)%(__in1)",
+
                 "pow":      "__out0 = (__in0)**(__in1)",
+                "ipow":     "__out0 = (__in0)**(int(__in1))",
+
+                "min":      "__out0 = min(__in0, __in1)",
+                "max":      "__out0 = max(__in0, __in1)",
         }
     # end def: __init__
 

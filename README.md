@@ -28,27 +28,27 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `add`
 - [ ] `add_any`
 - [x] `mul`
-- [ ] `sub`
-- [ ] `neg`
-- [ ] `div`
-- [ ] `rem`
-- [ ] `floor`
-- [ ] `ceil`
-- [ ] `round`
+- [x] `sub`
+- [x] `neg`
+- [x] `div`
+- [x] `rem`
+- [x] `floor`
+- [x] `ceil`
+- [x] `round`
 - [ ] `clamp`
-- [ ] `integer_pow`
+- [x] `integer_pow`
 - [x] `pow`
-- [ ] `sqrt`
-- [ ] `log`
-- [ ] `exp`
+- [x] `sqrt`
+- [x] `log`
+- [x] `exp`
 - [ ] `dot_general`
-- [ ] `cos`
-- [ ] `sin`
-- [ ] `tan`
-- [ ] `tanh`
-- [ ] `acos`
-- [ ] `asin`
-- [ ] `atan`
+- [x] `cos`
+- [x] `sin`
+- [x] `tan`
+- [x] `tanh`
+- [x] `acos`
+- [x] `asin`
+- [x] `atan`
 - [ ] `copy`
 - [ ] `convert_element_type`
 - [ ] `reshape`
@@ -67,8 +67,8 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [ ] `reduce_min`
 - [ ] `max`
 - [ ] `reduce_max`
-- [ ] `abs`
-- [ ] `sign`
+- [x] `abs`
+- [x] `sign`
 - [ ] `reduce_sum`
 - [ ] `broadcast_in_dim` (free to take see `philip.dev.better_slicing`)
 - [ ] `select_n`
