@@ -17,7 +17,7 @@ class JaxprToSDFG:
     - Managing the variables and keeping track of which Jax Variables belongs to which SDFG one.
 
     However, it is unable to translate an equation on its own, this is delagated to a translator.
-    To add one you habe to register it inside `_initEqnTranslators()`.
+    To add one you habe to register it inside modul constant `translators.ALL_TRAFOS`.
 
     Todo:
         There is some issue with the datatype, see hack in `_translateDType()`.
@@ -68,13 +68,13 @@ class JaxprToSDFG:
     def _initEqnTranslators(self, *args, **kwargs):
         """This function initializes all the transformers that are used inside `self`.
         """
-        from .translators import SimpleTransformator, SlicingTransformator
+        from .translators import ALL_TRAFOS
 
         if(self.m_eqnTranslators is not None):
             raise ValueError(f"The translators are already initialized.")
         self.m_eqnTranslators = []
 
-        for cls in [SimpleTransformator, SlicingTransformator]:
+        for cls in ALL_TRAFOS:
             self.m_eqnTranslators.append( cls(*args, **kwargs) )
         #
         return self
