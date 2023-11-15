@@ -10,6 +10,9 @@ from typing import Union
 class SlicingTransformator(JaxIntrinsicTranslatorInterface):
     """This class handles slicing, it does this by copying the array.
 
+    To be specifical it handles the `slice` intrinsic, which is slicing with a step size of 1.
+    If the stepsize is not one it seems to be reduced to a combination of `broadcast_in_dim` and `gather`.
+
     Todo:
         Implement the copy as a view.
     """

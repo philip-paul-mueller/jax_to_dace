@@ -52,7 +52,7 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [ ] `copy`
 - [ ] `convert_element_type`
 - [ ] `reshape`
-- [x] `gather` (Philip)
+- [ ] `gather` (free to take see `philip.dev.better_slicing`)
 - [ ] `random_seed`
 - [ ] `random_unwrap`
 - [ ] `random_wrap`
@@ -70,7 +70,7 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [ ] `abs`
 - [ ] `sign`
 - [ ] `reduce_sum`
-- [x] `broadcast_in_dim` (Philip)
+- [ ] `broadcast_in_dim` (free to take see `philip.dev.better_slicing`)
 - [ ] `select_n`
 - [ ] `ne`
 - [ ] `eq`
