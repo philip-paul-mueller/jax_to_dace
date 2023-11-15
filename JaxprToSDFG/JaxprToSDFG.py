@@ -394,6 +394,7 @@ class JaxprToSDFG:
     #   Misc
     #
 
+    @staticmethod
     def _translateDType(dtype):
         """Translates the Jax datatypes into the ones used by DaCe.
         """
