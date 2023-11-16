@@ -15,7 +15,8 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
     - either 1 or 2 input values.
     - exactly one output value.
     - all non-literal operants (output and all inputs) must habe the same shape.
-    - at least most one input can be a literal.
+    - in the array case, i.e. output is an array, at least most one input can be a literal
+    - in the scalar case all arguments can be litterals.
 
     Examples for simple operations are:
     - Arethmetic operations.
@@ -80,6 +81,13 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
     ):
         """Tests if the equation can be handled by `self`.
         """
+        # Only limited testing is performed here; see `translateEqn()` for more detailed explanations.
+        is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
+        if((not (1 <= len(eqn.invars) <= 2)) or len(eqn.outvars) != 1):     # restrictions on in/output
+            return False
+        if((not is_scalar) and all([x is None  for x in inVarNames])):      # in array case there must be a real array among the inputs, but not in scalar case
+            return False
+        #
 
         if(len(eqn.invars) == 1):
             return str(eqn.primitive.name) in self.m_unarryOps
@@ -109,17 +117,21 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             eqnState:       This is the SDFG State into which the translation should happen.
 
         """
+        # In the tests below we ensures that everything has the same shape, thus to test
+        # if we are scalar or not it is sufficient to check if the output is.
+        is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
+
         if(not (1 <= len(eqn.invars) <= 2)):
             raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
         if(len(eqn.outvars) != 1):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
+        if(outVarNames[0] is None):
+            raise ValueError(f"The outut name must be a real variable.")
         if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
            raise ValueError(f"Expected that all the input arguments have the same shape.")
-        if(len([x  for x in inVarNames if isinstance(x, str)]) == 0):
-            raise ValueError(f"Only passed lterals.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
-        if([eqn.invars[i]  for i in range(len(inVarNames)) if inVarNames[i] is not None][0].aval.shape != eqn.outvars[0].aval.shape):
+        if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
            raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
         if(len(eqn.effects) != 0):
             raise ValueError(f"Can only handle equations without any side effects.")
@@ -127,12 +139,13 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Can only handle quations without any parameters.")
         #
 
-        # This works because we requiere that all non literal in/outputs have the same shape
-        is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
-
         # We only need a map range if we are not scalar
         if(not is_scalar):
             tMapRanges = [ (f'__i{dim}', f'0:{N}')  for dim, N in enumerate(eqn.invars[0].aval.shape) ]
+
+            if(len([x  for x in inVarNames if isinstance(x, str)]) == 0):
+                raise ValueError(f"Only literals as inputs is only allowed for the scalar case.")
+            #
         #
 
         tInputs = []
@@ -147,9 +160,6 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             if(is_scalar):  iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
             else:           iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
             tInputs.append( (f'__in{i}', iMemlet) )
-        #
-        if(all(x is None  for x, y in tInputs)):
-            raise ValueError(f"Found only literals, which is currently not supported.")
         #
 
         # Generate the tasklet code
