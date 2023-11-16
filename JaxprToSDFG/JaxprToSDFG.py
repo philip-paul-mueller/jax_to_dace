@@ -19,6 +19,14 @@ class JaxprToSDFG:
     However, it is unable to translate an equation on its own, this is delagated to a translator.
     To add one you habe to register it inside modul constant `translators.ALL_TRAFOS`.
 
+    The idea of the transformation is quite simple.
+    Since Jaxpr is essentially a list of more or less simple instructions which stores the result in one variable,
+    we can just process one after the other into a "mapped tasklet" (in the simplest case) and connect them through temporaries.
+
+    Notes:
+        Equations that only have `_` as output variables are ignored.
+            It seems that `grad` inserts them.
+
     Todo:
         Fully dynamic storage sizes or just the strides(?), i.e. make them symbols such that DaCe can play more.
     """
@@ -89,9 +97,6 @@ class JaxprToSDFG:
 
     def transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
         """Transforms the `jaxpr` into an SDFG and returns it.
-
-        The idea of the transformation is quite simple.
-        Since Jaxpr is essentially a list of more or less simple instructions we can just loop through them and transform them, each of them translates to a single map.
         """
         old64BitValue = jax.config.read("jax_enable_x64")       # It seams that there is no context manager for this (at least not a documented one).
         try:
@@ -339,8 +344,13 @@ class JaxprToSDFG:
 
         # Now transforming every equation one by one.
         for eqn in jaxpr.jaxpr.eqns:
+            assert not any([str(inVar) == '_'  for inVar in eqn.invars])
+            if(all([str(outVar) == '_'  for outVar in eqn.outvars])):
+                assert len(eqn.effects) == 0        # This is for safe keeping, check what Jax is doing
+                continue
+            #
             self._translateEqn(jaxpr, eqn)
-        #
+        # end for(eqn): transforming
 
         # Handle the output stuff
         self._createReturnOutput(jaxpr)
@@ -369,8 +379,9 @@ class JaxprToSDFG:
         eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
 
         # We now create the name list for the variables
-        inVarNames  = self._createJaxVarList(eqn.invars )       ; assert not all([i is     None  for i in inVarNames ]), "There wehere only literals in an operation."
-        outVarNames = self._createJaxVarList(eqn.outvars)       ; assert     all([o is not None  for o in outVarNames])
+        inVarNames  = self._createJaxVarList(eqn.invars )
+        outVarNames = self._createJaxVarList(eqn.outvars)
+        assert all([(o is not None) and (o in self.m_sdfg.arrays)  for o in outVarNames])
 
 
         # Now we look for the translator that can handle the primitive
