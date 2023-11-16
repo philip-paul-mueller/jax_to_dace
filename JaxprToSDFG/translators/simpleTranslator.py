@@ -123,20 +123,61 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
         # if we are scalar or not it is sufficient to check if the output is.
         is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
 
-        if(not (1 <= len(eqn.invars) <= 2)):
+        if(not (1 <= len(eqn.invars) <= 2)):        # Never remove this ceck the whole code depends on that.
             raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
         if(len(eqn.outvars) != 1):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
         if(outVarNames[0] is None):
             raise ValueError(f"The outut name must be a real variable.")
-        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
-           raise ValueError(f"Expected that all the input arguments have the same shape.")
+        if(not all([len(eqn.outvars[0].aval.shape) == len(eqn.invars[i].aval.shape)  for i in range(len(inVarNames)) if inVarNames[i] is not None])):
+            raise ValueError(f"Found shapes that differs in the number of dimensions: {eqn}.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
-        if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
-           raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
         if(len(eqn.effects) != 0):
             raise ValueError(f"Can only handle equations without any side effects.")
+        #
+
+
+        # We are now checking if there is broadcasting going on.
+        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
+            # There are shapes that differ, this might indicate broadcasting.
+            #  So we have to check in how they are differents
+
+            if(any([x is None  for x in inVarNames])):
+                raise ValueError(f"Can not do broadcasting when one of the arguments is a literal.")
+            #
+
+            outShp  = tuple(eqn.outvars[0].aval.shape)  # Shape of the output.
+            inpShpL = tuple(eqn.invars[0].aval.shape)   # shape of the left/first input
+            inpShpR = tuple(eqn.invars[1].aval.shape)   # shape of the right/second input; this must be "expanded"
+            assert outShp == inpShpL                    # By our assumptions these checks have to pass
+            assert inpShpL != inpShpR
+            assert len(inpShpL) == len(inpShpR)
+            assert inpShpR[0] == 1      # At least this must hold, indicating padding.
+            assert inpShpL[-1] == inpShpR[-1]
+
+            # We now look for the place where they start to differ
+            #  but we have to do that from right to left, which is a bit of a pain.
+            spltPoint = None
+            for i in reversed(range(len(outShp))):
+                lftSize  = inpShpL[i]       # size of the array in dimension `i`
+                rghtSize = inpShpR[i]
+
+                if(spltPoint is None):              # Depending if we found the splitting point, the checks are different.
+                    if(lftSize != rghtSize):        # We found the splitting point.
+                        assert rghtSize < lftSize
+                        spltPoint = i + 1           # We have to add since we want `inShpR[spltPoint:]` be all correct ones.
+                else:
+                    assert rghtSize != 1
+                    assert 0 < rghtSize <= lftSize
+            assert spltPoint is not None
+            #
+            expandingBroadcastNeeded = True
+
+        else:
+            if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
+                raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvars[0].shape}) have the same shapes.")
+            expandingBroadcastNeeded = False
         #
 
         # We only need a map range if we are not scalar
@@ -157,8 +198,12 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
             # Depending if we have a scalar or not create another memlet, they differ in what they transport
             #  The scalar one moves all, i.e. a single element and the array one is the usual map thing that iterates through everything.
-            if(is_scalar):  iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
-            else:           iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
+            if(is_scalar):
+                iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
+            elif(expandingBroadcastNeeded and i != 0):
+                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join(['0'  for _ in range(spltPoint)] + [X[0]  for X in tMapRanges[spltPoint:] ]))
+            else:
+                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
             tInputs.append( (f'__in{i}', iMemlet) )
         #
 
