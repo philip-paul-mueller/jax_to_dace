@@ -74,6 +74,8 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
     def canHandle(self,
                   translator,
+                  inVarNames: list[Union[str, None]],
+                  outVarNames: list[str],
                   eqn: JaxprEqn,
     ):
         """Tests if the equation can be handled by `self`.

@@ -24,12 +24,16 @@ class JaxIntrinsicTranslatorInterface:
 
     def canHandle(self,
                   translator,
+                  inVarNames: list[Union[str, None]],
+                  outVarNames: list[str],
                   eqn: JaxprEqn,
     ):
         """Tests if `self` is able to translate `eqn` into a corresponding SDFG construct.
 
         Args:
             translator:     The `JaxprToSDFG` instance that is respnsible for the translation.
+            inVarNames:     List of the names of the arrays created inside the SDFG for the inpts.
+            outVarNames:    List of the names of the arrays created inside the SDFG for the outputs.
             eqn:            The `JaxprEqn` instance that is currently being handled.
 
         Notes:
@@ -63,7 +67,8 @@ class JaxIntrinsicTranslatorInterface:
 
         Notes:
             The `{in,out}VarNames` have the same order as `eqn.{in,out}vars`.
-            It is possible that `inVarNames` are `None` which means that the argument is a scalar literal that was not created inside the literal.
+            It is possible that entries in `inVarNames` are `None` which means that the argument is a literal and no array inside the SDFG was created for it.
+                It is possible that `inVarNames` may only contains `None`, which is an edge case, but must be handled.
                 `outVarNames` will never contain `None` values.
             Returning the `eqnState` allows the function to modify, i.e. add more states, as just one state.
                 In previous versions this was not requiered, as a compability feature if `None` is returned it is assumed that `eqnState` is returned.

@@ -369,12 +369,13 @@ class JaxprToSDFG:
         eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
 
         # We now create the name list for the variables
-        inVarNames  = self._createJaxVarList(eqn.invars )
-        outVarNames = self._createJaxVarList(eqn.outvars)
+        inVarNames  = self._createJaxVarList(eqn.invars )       ; assert not all([i is     None  for i in inVarNames ]), "There wehere only literals in an operation."
+        outVarNames = self._createJaxVarList(eqn.outvars)       ; assert     all([o is not None  for o in outVarNames])
+
 
         # Now we look for the translator that can handle the primitive
         for eqnTranslator in self.m_eqnTranslators:
-            if(eqnTranslator.canHandle(self, eqn)):
+            if(eqnTranslator.canHandle(translator=self, inVarNames=inVarNames, outVarNames=outVarNames, eqn=eqn)):
                 break   # We have found it
         else:
             raise NotImplementedError(f"Does not know how to handle primitive '{eqn.primitive.name}'.")
