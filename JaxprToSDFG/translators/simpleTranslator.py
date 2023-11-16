@@ -11,6 +11,12 @@ from typing import Union, Any
 class SimpleTransformator(JaxIntrinsicTranslatorInterface):
     """This class handles all the simple cases where only one tasklet is used.
 
+    Current restrictions of the translator:
+    - either 1 or 2 input values.
+    - exactly one output value.
+    - all non-literal operants (output and all inputs) must habe the same shape.
+    - at least most one input can be a literal.
+
     Examples for simple operations are:
     - Arethmetic operations.
     - Mathematical Functions.
@@ -107,7 +113,7 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
         if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
            raise ValueError(f"Expected that all the input arguments have the same shape.")
-        if(len([isinstance(inVarNames[i], str)  for i in range(len(inVarNames))]) == 0):
+        if(len([x  for x in inVarNames if isinstance(x, str)]) == 0):
             raise ValueError(f"Only passed lterals.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
