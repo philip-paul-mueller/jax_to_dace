@@ -123,10 +123,16 @@ class JaxprToSDFG:
     def _addArray(self, arg, isTransient=True, altName=None, forceArray = False):
         """Creates an array inside Dace for `arg` and return its name.
 
-        Note that this function, by defaults creates transients.
-        This is different from the `add_array()` function of DaCe.
-        This function also distinguishes between `Scalar`s (empty shape) and `Array`s (the rest).
+        Note that this function, by defaults creates transients, which is different from `SDFG.add_array()`.
+        The function also distinguishes between `Scalar`s (having empty shapes) and `Array`s (non-empty shape)
+        and calls `SDFG.add_scalar()` or `SDFG.add_array()` respectively.
         However, by setting `forceArray` to `True` the function will turn a `Scalar` into a one element `Array`.
+
+        The name of the entity that is created is usually `str(arg)`, however, the function will enforce some restrictions on that.
+        However, these restrictions are not applied to names passed through `altName`.
+
+        Returns:
+            The name of the array inside `self.m_sdfg`.
 
         Args:
             arg:            The Jax object that should be maped to dace.
@@ -134,11 +140,17 @@ class JaxprToSDFG:
             forceArray:     Turn scalar in one element arrays.
 
         Notes:
-            This function does not update the internal variable map, thus you should not use it.
+            This function does not update the internal variable map, thus you should not use it, except you know what you are doing.
                 Instead you should use `_createInitialInputs()`, `_createReturnOutput()`, `_createJaxVariable()` or `_createJaxVarList()`, that updates the map.
         """
         if isinstance(arg, jax._src.core.Var):
-            pass
+            propName = str(arg)             # This is the name that is _suggested_ by the convertion.
+            if(altName is not None):        # Another name is passed anyway so no check is needed
+                pass
+            elif(propName.startswith('__')):    # names starting with `__` are DaCe internals.
+                raise ValueError(f"You tried to create the variable `{propName}` which starts with two underscores, if you really want to do that use `altName`.")
+            else:
+                pass
         elif isinstance(arg, jax._src.core.Literal):
             raise NotImplementedError(f"Jax Literals are not yet implemented.")
         else:
