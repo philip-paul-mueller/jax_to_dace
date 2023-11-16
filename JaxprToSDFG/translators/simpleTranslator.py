@@ -72,6 +72,10 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
                 "min":          "__out0 = min(__in0, __in1)",
                 "max":          "__out0 = max(__in0, __in1)",
         }
+
+        for n, o in [('ne', '!='), ('eq', '=='), ('ge', '>='), ('gt', '>'), ('lt', '<'), ('le', '<=')]:
+            self.m_binarryOps[n] = f'__out0 = (__in0) {o} (__in1)'
+        #
     # end def: __init__
 
 
