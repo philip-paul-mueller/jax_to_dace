@@ -34,41 +34,43 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
         # We will now create maps, that maps the name of a primitive to a certain tasklet code.
         self.m_unarryOps = {
-                "pos":      "__out0 = +(__in0)",
-                "neg":       "__out0 = -(__in0)",
+                "pos":          "__out0 = +(__in0)",
+                "neg":          "__out0 = -(__in0)",
 
-                "floor":    "__out0 = floor(__in0)",
-                "ceil":     "__out0 = ceil(__in0)",
-                "round":    "__out0 = round(__in0)",
-                "abs":      "__out0 = abs(__in0)",
-                "sign":     "__out0 = sign(__in0)",
+                "floor":        "__out0 = floor(__in0)",
+                "ceil":         "__out0 = ceil(__in0)",
+                "round":        "__out0 = round(__in0)",
+                "abs":          "__out0 = abs(__in0)",
+                "sign":         "__out0 = sign(__in0)",
 
-                "sqrt":     "__out0 = sqrt(__in0)",
+                "sqrt":         "__out0 = sqrt(__in0)",
 
-                "log":      "__out0 = log(__in0)",
-                "exp":      "__out0 = exp(__in0)",
+                "log":          "__out0 = log(__in0)",
+                "exp":          "__out0 = exp(__in0)",
+                "integer_pow":  "__out0 = (__in0)**({y})",  # 'y' is a parameter of the primitive
 
-                "sin":      "__out0 = sin(__in0)",
-                "asin":     "__out0 = asin(__in0)",
-                "cos":      "__out0 = cos(__in0)",
-                "acos":     "__out0 = acos(__in0)",
-                "tan":      "__out0 = tan(__in0)",
-                "atan":     "__out0 = atan(__in0)",
-                "tanh":     "__out0 = tanh(__in0)",
+                "sin":          "__out0 = sin(__in0)",
+                "asin":         "__out0 = asin(__in0)",
+                "cos":          "__out0 = cos(__in0)",
+                "acos":         "__out0 = acos(__in0)",
+                "tan":          "__out0 = tan(__in0)",
+                "atan":         "__out0 = atan(__in0)",
+                "tanh":         "__out0 = tanh(__in0)",
         }
         self.m_binarryOps = {
-                "add":      "__out0 = (__in0)+(__in1)",
-                "sub":      "__out0 = (__in0)-(__in1)",
-                "mul":      "__out0 = (__in0)*(__in1)",
-                "div":      "__out0 = (__in0)/(__in1)",
+                "add":          "__out0 = (__in0)+(__in1)",
+                "add_any":      "__out0 = (__in0)+(__in1)",     # No idea what makes `add_any` differ from `add`
+                "sub":          "__out0 = (__in0)-(__in1)",
+                "mul":          "__out0 = (__in0)*(__in1)",
+                "div":          "__out0 = (__in0)/(__in1)",
 
-                "rem":      "__out0 = (__in0)%(__in1)",
+                "rem":          "__out0 = (__in0)%(__in1)",
 
-                "pow":      "__out0 = (__in0)**(__in1)",
-                "ipow":     "__out0 = (__in0)**(int(__in1))",
+                "pow":          "__out0 = (__in0)**(__in1)",
+                "ipow":         "__out0 = (__in0)**(int(__in1))",
 
-                "min":      "__out0 = min(__in0, __in1)",
-                "max":      "__out0 = max(__in0, __in1)",
+                "min":          "__out0 = min(__in0, __in1)",
+                "max":          "__out0 = max(__in0, __in1)",
         }
     # end def: __init__
 
@@ -135,8 +137,6 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
            raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
         if(len(eqn.effects) != 0):
             raise ValueError(f"Can only handle equations without any side effects.")
-        if(len(eqn.params) != 0):
-            raise ValueError(f"Can only handle quations without any parameters.")
         #
 
         # We only need a map range if we are not scalar
@@ -225,7 +225,7 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
         tName = eqn.primitive.name
         for M in [self.m_unarryOps, self.m_binarryOps]:
             if(tName in M):
-                tCode = M[tName]
+                tCode: str = M[tName]
                 break
         else:
             raise ValueError(f"Does not know how to translate primitive '{tName}'")
@@ -241,6 +241,11 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             else:
                 raise ValueError(f"Can not handle the literal case of shape: {jaxInVar.aval.shape}")
         # end for(i):
+
+        # Now replace the parameters
+        if(len(eqn.params) != 0):
+            tCode = tCode.format(**eqn.params)
+        #
 
         return tCode
     # end def: _writeTaskletCode
