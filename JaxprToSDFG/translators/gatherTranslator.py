@@ -111,14 +111,14 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         #  have to perfrom `idxShape[0]` many iterations.
         SDFG: dace.SDFG = translator.getSDFG()
 
-        entry_state: dace.SDFGState       = eqnState                                          # This is very we beguin.
+        entry_state: dace.SDFGState       = SDFG.add_state('_gather_meta_entry')
         guard_state: dace.SDFGState       = SDFG.add_state('_gather_guard')
-        loop_body_state: dace.SDFGState  = SDFG.add_state('_gather_loop_body')
+        loop_body_state: dace.SDFGState   = SDFG.add_state('_gather_loop_body')
         loop_end_state: dace.SDFGState    = SDFG.add_state('_gather_loop_end')
-        eqnState: dace.SDFGState          = loop_end_state
         loop_var                          = '__gather_loop_var'
 
         # After the states we have to create the connections between them
+        SDFG.add_edge(eqnState,        entry_state,     data=InterstateEdge())
         SDFG.add_edge(entry_state,     guard_state,     data=InterstateEdge(assignments={loop_var: "0"}))      # We have to implement the loo
         SDFG.add_edge(guard_state,     loop_end_state,  data=InterstateEdge(condition=f'{loop_var} == {idxShape[0]}'))
         SDFG.add_edge(loop_body_state, guard_state,     data=InterstateEdge(assignments={loop_var: f'{loop_var} + 1'}))
@@ -142,13 +142,13 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         corr_slice_size = tuple([ss  for i, ss in enumerate(slice_sizes) if i not in collapsed_slice_dims])
         is_scalar_patch = corr_slice_size == ()
 
-        assert not is_scalar_patch
+        #assert not is_scalar_patch
 
         tMapRanges = []
         for dim, slice_size in enumerate(slice_sizes):
             if((dim in batch_dims) and (dim in start_index_map)):
                 assert dim in collapsed_slice_dims
-                tMapRanges.append( (f'__i{dim}', f'0:1)') )             # We will the offsets indexes later.
+                tMapRanges.append( (f'__i{dim}', f'0:1') )             # We will the offsets indexes later.
             elif(dim in batch_dims):
                 tMapRanges.append( (None, None) )                       # These index is handled by the state machine.
             else:
@@ -156,6 +156,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         #
 
         # Now we will write the output memlets.
+        tOutputs = []
         tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join([X[0]  for X in tMapRanges if X[0] is not None]))) )
 
         # The code is also very simple
@@ -184,7 +185,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
             external_edges=True,
         )
 
-        return loop_body_state
+        return loop_end_state
     # end def: translateEqn
 
 
