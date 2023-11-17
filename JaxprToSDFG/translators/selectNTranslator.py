@@ -5,7 +5,7 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorIn
 from jax._src.core import JaxprEqn
 import dace
 from dace import subsets
-from typing import Union
+from typing import Union, Any
 
 
 
@@ -117,7 +117,7 @@ class SelectNTransformator(JaxIntrinsicTranslatorInterface):
         #
 
         # Generate the tasklet code
-        tCode = self._writeTaskletCode(inVarNames, eqn, self._isIntDType(eqn.outvars[0].aval.dtype)
+        tCode = self._writeTaskletCode(inVarNames, eqn, self._isIntDType(eqn.outvars[0].aval.dtype))
 
         # As above we will now create output memlets, they follow the same logic.
         tOutputs = []
