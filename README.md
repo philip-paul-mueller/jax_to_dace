@@ -37,7 +37,7 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `sqrt`
 - [x] `log`
 - [x] `exp`
-- [ ] `dot_general`
+- [x] `dot_general`
 - [x] `cos`
 - [x] `sin`
 - [x] `tan`
