@@ -156,8 +156,14 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         #
 
         # Now we will write the output memlets.
-        tOutputs = []
-        tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join([X[0]  for X in tMapRanges if X[0] is not None]))) )
+        tOutputs_, tOutputs = [], []
+        for dim, dMapRange in enumerate(tMapRanges):
+            if(dim in batch_dims):
+                tOutputs_.append(loop_var)
+            else:
+                tOutputs_.append(dMapRange[0])
+        tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))) )         ; del tOutputs_
+
 
         # The code is also very simple
         tCode = '__out0 = __in0'
