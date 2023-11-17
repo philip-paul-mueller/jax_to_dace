@@ -117,7 +117,7 @@ class SelectNTransformator(JaxIntrinsicTranslatorInterface):
         #
 
         # Generate the tasklet code
-        tCode = self._writeTaskletCode(inVarNames, eqn, self._isIntDType(eqn.outvars[0].aval.dtype))
+        tCode = self._writeTaskletCode(inVarNames, eqn, self._isIntDType(eqn.invars[0].aval.dtype))
 
         # As above we will now create output memlets, they follow the same logic.
         tOutputs = []
@@ -178,10 +178,10 @@ class SelectNTransformator(JaxIntrinsicTranslatorInterface):
         """
         assert len(inVarNames) >= 3
 
-        if(intMode):
-            # Bool or true `where` mode
+        if(not intMode):
             assert len(inVarNames) == 3
-            tCode = '__out = __in0 if __cond else __in1'
+            # The order here is strange, because `False` is `0` and thus we have to select the first one.
+            tCode = '__out0 = __in1 if __cond else __in0'
 
         else:
             # This is the integer select mode.
