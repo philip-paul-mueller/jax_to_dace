@@ -198,6 +198,66 @@ class JaxprToSDFG:
     # end def: _addArray
 
 
+    def _addViewLike(self, likeThis, newName = None, newShape = None):
+        """This function allows to create view that is is similar to `likeThis`.
+
+        If `likeThis` is a string it is assumed to name an SDFG Array.
+        If `newName` is `None` a new name will be derived.
+
+
+        Args:
+            likeThis:       Take anything not specified from this template.
+            newName:        The new name that should be used for it.
+            newShape:       The shape that should be used.
+
+        Notes:
+            The number of elements given by `likeThis` must not match `newShape`.
+        """
+        if isinstance(likeThis, jax._src.core.Var):
+            likeThis = str(likeThis)
+            assert likeThis in self.m_jaxNameMap, f"Expected to find a mapping for jax variable '{likeThis}' to a SDFG array, but it is not known."
+            srcArray: dace.data.Array = self.m_sdfg.arrays[ self.m_jaxNameMap[likeThis] ]
+        elif isinstance(arg, jax._src.core.Literal):
+            raise NotImplementedError(f"Jax Literals are not yet implemented.")
+        elif isinstance(likeThis, str):
+            assert likeThis in self.m_sdfg.arrays
+            srcArray: dace.data.Array = self.m_sdfg.arrays[likeThis]
+        else:
+            raise TypeError(f"Does not know how to handle {type(arg)}.")
+        #
+
+        if(newName is None):
+            newNameTmpl = f'{likeThis}_view'
+            for i in range(1, 100):
+                newName = newNameTmpl + '_' + str(i)
+                if(newName not in self.m_sdfg.arrays):
+                    break
+            else:
+                raise ValueError(f"Failed to derive a new name for '{likeThis}'")
+        #
+        assert isinstance(newName, str)
+        assert len(newName) != 0
+
+        if(newName in self.m_sdfg.arrays):
+            raise ValueError(f"Requested to generate a view with name `{newName}` but it is already taken.")
+        #
+
+        dType   = srcArray.dtype
+        shape   = srcArray.shape if newShape is None else newShape
+        strides = None
+        offset  = None
+        transient = True
+
+        self.m_sdfg.add_view(
+                name=newName,
+                shape=shape,
+                dtype=dType,
+                strides=strides,
+                offset=offset)
+        return newName
+    # end def: _addViewLike
+
+
     def _createInitialInputs(self, jaxpr: ClosedJaxpr):
         """Creates the initial inputs, i.e. arguments to the jax expression.
 
@@ -254,7 +314,6 @@ class JaxprToSDFG:
             memlet = dace.Memlet.from_array(sVar, self.getArray(jVar))
             final_state.add_edge(jAN, None, sAN, None, memlet)                      # Now we add  the connection between them
         #
-
         return
     # end def: _createReturnOutput
 
@@ -376,7 +435,7 @@ class JaxprToSDFG:
         assert len(eqn.effects) == 0, "This class can only handle siode efect free equations."
 
         # Inside this state we will add everything that is related to this equation.
-        eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
+        eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{str(eqn.outvars[0])}__{id(eqn)}')
 
         # We now create the name list for the variables
         inVarNames  = self._createJaxVarList(eqn.invars )
