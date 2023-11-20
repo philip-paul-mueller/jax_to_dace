@@ -8,6 +8,8 @@ from .broadcastinDimTranslator                      import BroadcastInDimTransfo
 from .selectNTranslator                             import SelectNTransformator
 from .gatherTranslator                              import GatherTransformator
 from .concatenateTranslator                         import ConcatenateTransformator
+from .convertElementTypeTranslator                  import ConvertElementTypeTransformator
+from .devicePutTranslator                           import DevicePutTransformator
 
 ALL_TRAFOS = [
     SimpleTransformator,
@@ -16,6 +18,8 @@ ALL_TRAFOS = [
     SelectNTransformator,
     GatherTransformator,
     ConcatenateTransformator,
+    ConvertElementTypeTransformator,
+    DevicePutTransformator,
 ]
 
 
