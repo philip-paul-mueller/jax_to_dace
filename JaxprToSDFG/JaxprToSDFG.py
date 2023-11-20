@@ -99,11 +99,12 @@ class JaxprToSDFG:
         """Transforms the `jaxpr` into an SDFG and returns it.
         """
         old64BitValue = jax.config.read("jax_enable_x64")       # It seams that there is no context manager for this (at least not a documented one).
+        self._clearState()
         try:
             jax.config.update("jax_enable_x64", True)           # Esnures that 64Bits are enabled this is what DaCe is implicitly assuming.
             return self._transform(jaxpr)                       #  However, it would make more sense to check that during the creation of the jaxpr.
         finally:
-            self._clearState()
+            #self._clearState()
             jax.config.update("jax_enable_x64", old64BitValue)
         #
     #
