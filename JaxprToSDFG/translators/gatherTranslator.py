@@ -142,13 +142,11 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         corr_slice_size = tuple([ss  for i, ss in enumerate(slice_sizes) if i not in collapsed_slice_dims])
         is_scalar_patch = corr_slice_size == ()
 
-        #assert not is_scalar_patch
-
         tMapRanges = []
         for dim, slice_size in enumerate(slice_sizes):
-            if((dim in batch_dims) and (dim in start_index_map)):
+            if((dim in batch_dims) and (dim in start_index_map)):       # TODO: Is this correct, since 
                 assert dim in collapsed_slice_dims
-                tMapRanges.append( (f'__i{dim}', f'0:1') )             # We will the offsets indexes later.
+                tMapRanges.append( (f'__i{dim}', f'0:1') )              # We will the offsets indexes later.
             elif(dim in batch_dims):
                 tMapRanges.append( (None, None) )                       # These index is handled by the state machine.
             else:
@@ -160,6 +158,8 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         for dim, dMapRange in enumerate(tMapRanges):
             if(dim in batch_dims):
                 tOutputs_.append(loop_var)
+            elif(dim in collapsed_slice_dims):
+                pass
             else:
                 tOutputs_.append(dMapRange[0])
         tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))) )         ; del tOutputs_
