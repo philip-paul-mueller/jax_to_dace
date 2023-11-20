@@ -5,6 +5,7 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorIn
 
 from jax._src.core import JaxprEqn
 import dace
+import numpy as np
 from typing import Union, Any
 
 
@@ -286,7 +287,11 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
             jaxInVar = eqn.invars[i]
             if(jaxInVar.aval.shape == ()):
-                tCode = tCode.replace(f"__in{i}", str(jaxInVar.val.max()))       # I do not know a better way in that case
+                tVal = jaxInVar.val
+                if(isinstance(tVal, np.ndarray)):
+                    tVal = jaxInVar.val.max()
+                #
+                tCode = tCode.replace(f"__in{i}", str(tVal))       # I do not know a better way in that case
             else:
                 raise ValueError(f"Can not handle the literal case of shape: {jaxInVar.aval.shape}")
         # end for(i):

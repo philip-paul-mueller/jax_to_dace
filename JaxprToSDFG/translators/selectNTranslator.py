@@ -3,6 +3,7 @@
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
 
 from jax._src.core import JaxprEqn
+import numpy as np
 import dace
 from dace import subsets
 from typing import Union, Any
@@ -203,10 +204,11 @@ class SelectNTransformator(JaxIntrinsicTranslatorInterface):
 
             jaxInVar = eqn.invars[i]
             if(jaxInVar.aval.shape == ()):
-                tCode = tCode.replace(
-                    f"__in{i-1}",               # We have to correct for the condition.
-                    str(jaxInVar.val.max())     # I do not know a better way in that case
-                )
+                tVal = jaxInVar.val
+                if(isinstance(tVal, np.ndarray)):
+                    tVal = jaxInVar.val.max()                   # I do not know a better way in that case
+                #
+                tCode = tCode.replace(f"__in{i-1}", str(tVal))  # We have to correct for the condition.
             else:
                 raise ValueError(f"Can not handle the literal case of shape: {jaxInVar.aval.shape}")
         # end for(i):
