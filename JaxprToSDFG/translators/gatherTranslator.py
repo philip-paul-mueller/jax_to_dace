@@ -152,7 +152,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
             elif(dim in batch_dims):
                 tMapRanges.append( (None, None) )                       # These index is handled by the state machine.
             else:
-                tMapRanges.append( (f'__i{dim}', f'0:{slice_size})') )
+                tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
         #
 
         # Now we will write the output memlets.
