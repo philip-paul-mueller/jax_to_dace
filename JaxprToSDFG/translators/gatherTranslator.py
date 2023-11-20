@@ -74,23 +74,23 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         """
         assert(len(eqn.invars) == 2)
 
-        output = eqn.outvars[0]
+        output   = eqn.outvars[0]
         outShape = eqn.outvars[0].aval.shape
-        inpArr = eqn.invars[0]      # The array we want to gather from
+        inpArr   = eqn.invars[0]      # The array we want to gather from
         inpShape = inpArr.aval.shape
-        idxArr  = eqn.invars[1]
+        idxArr   = eqn.invars[1]
         idxShape = idxArr.aval.shape
 
         if(len(idxShape) != 2):
             raise NotImplementedError(f"Currently more than this is not supported.")
         #
 
-        dimension_numbers = eqn.params['dimension_numbers']
+        dimension_numbers            = eqn.params['dimension_numbers']
         offset_dims: tuple[int, ...] = dimension_numbers.offset_dims
-        collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
-        start_index_map = dimension_numbers.start_index_map
-        slice_sizes = eqn.params['slice_sizes']
-        mode: GatherScatterMode = eqn.params['mode']
+        collapsed_slice_dims         = dimension_numbers.collapsed_slice_dims
+        start_index_map              = dimension_numbers.start_index_map
+        slice_sizes                  = eqn.params['slice_sizes']
+        mode: GatherScatterMode      = eqn.params['mode']
         assert len(start_index_map) == idxShape[-1]
 
         if(GatherScatterMode.PROMISE_IN_BOUNDS != mode):
@@ -111,11 +111,11 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         #  have to perfrom `idxShape[0]` many iterations.
         SDFG: dace.SDFG = translator.getSDFG()
 
-        entry_state: dace.SDFGState       = SDFG.add_state('_gather_meta_entry')
-        guard_state: dace.SDFGState       = SDFG.add_state('_gather_guard')
-        loop_body_state: dace.SDFGState   = SDFG.add_state('_gather_loop_body')
-        loop_end_state: dace.SDFGState    = SDFG.add_state('_gather_loop_end')
-        loop_var                          = '__gather_loop_var'
+        entry_state: dace.SDFGState       = SDFG.add_state(f'_gather_{str(outVarNames[0])}__meta_entry')
+        guard_state: dace.SDFGState       = SDFG.add_state(f'_gather_{str(outVarNames[0])}__guard')
+        loop_body_state: dace.SDFGState   = SDFG.add_state(f'_gather_{str(outVarNames[0])}__loop_body')
+        loop_end_state: dace.SDFGState    = SDFG.add_state(f'_gather_{str(outVarNames[0])}__loop_end')
+        loop_var                          = f'__gather_{str(outVarNames[0])}__loop_var'
 
         # After the states we have to create the connections between them
         SDFG.add_edge(eqnState,        entry_state,     data=InterstateEdge())
@@ -135,55 +135,64 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
             )
         )
 
-
         # This is the corrected slice size window, where we have colapsed away 1 sized dimensions.
         #  It is basically hwo much is copied in each iteration of the copy state machine.
         #  If it is the empty tuple, then we have to copy around a scalar.
         corr_slice_size = tuple([ss  for i, ss in enumerate(slice_sizes) if i not in collapsed_slice_dims])
+        assert len(corr_slice_size) == len(offset_dims)
         is_scalar_patch = corr_slice_size == ()
 
-        tMapRanges = []
+        tMapRanges = []         # Range of the map
+        tInputs_   = []         # Access elements.
+        itSpaceCnt = 0          # Counter for generating iteration space.
+        itSpaceVar = []
         for dim, slice_size in enumerate(slice_sizes):
-            if((dim in batch_dims) and (dim in start_index_map)):       # TODO: Is this correct, since 
-                assert dim in collapsed_slice_dims
-                tMapRanges.append( (f'__i{dim}', f'0:1') )              # We will the offsets indexes later.
-            elif(dim in batch_dims):
-                tMapRanges.append( (None, None) )                       # These index is handled by the state machine.
+            if(dim not in start_index_map):
+                # This dimension is fully copied, by the map.
+                tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
+                tInputs_.append( tMapRanges[-1][0] )
+                itSpaceVar.append( tInputs_[-1] )
+                itSpaceCnt += 1
+            elif(dim in collapsed_slice_dims):
+                # It is collapsed so we only have to copy the element that is denoted.
+                #  However, it does not open a new iteration loop.
+                tInputs_.append( f'__i{dim}_gather_offset' )
+
             else:
-                tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
+                # The dimension is not collapsed, but there is an offset, it also opens an iteration space
+                tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
+                tInputs_.append( tMapRanges[-1][0] + f" + __i{dim}_gather_offset" )
+                itSpaceVar.append( tMapRanges[-1][0] )
+                itSpaceCnt += 1
+            #
+        #
+        assert len(itSpaceVar) == len(offset_dims)
+        tInputs = []
+        tInputs.append( ('__in0', dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))) )
+
+        # Otherwise there is nothing that is used.
+        if(is_scalar_patch):
+            tMapRanges.append( ('__inDUMMY', '0:1') )
         #
 
-        # Now we will write the output memlets.
-        tOutputs_, tOutputs = [], []
-        for dim, dMapRange in enumerate(tMapRanges):
-            if(dim in batch_dims):
-                tOutputs_.append(loop_var)
-            elif(dim in collapsed_slice_dims):
-                pass
+        # Now the output variables.
+        tOutputs_ = []
+        for dim in range(len(outShape)):
+            if(dim in offset_dims):
+                iDim = offset_dims.index(dim)
+                tOutputs_.append( itSpaceVar[iDim] )
             else:
-                tOutputs_.append(dMapRange[0])
+                assert len(batch_dims) == 1
+                tOutputs_.append( loop_var )
+        #
+        tOutputs = []
         tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))) )         ; del tOutputs_
-
 
         # The code is also very simple
         tCode = '__out0 = __in0'
 
-        # Nnow we create the input memlets, they are not that simple, since we have to consider the
-        #  To build the memlet we have to consider also the external state machine.
-        tInputs_, tInputs = [], []
-        for dim, dMapRange in enumerate(tMapRanges):
-            if(dMapRange[0] is None):
-                pass
-            elif(dim in start_index_map):
-                tInputs_.append(dMapRange[0] + f" + __i{dim}_gather_offset")
-            else:
-                tInputs_.append(dMapRange[0])
-        #
-        tInputs.append( ('__in0', dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))) )
-        del tInputs_
-
         loop_body_state.add_mapped_tasklet(
-            name="_BRIADCAST_",
+            name=f"_gather_map_{str(outVarNames[0])}_",
             map_ranges=self._listToDict(tMapRanges),
             inputs=self._listToDict(tInputs),
             code=tCode,
@@ -203,8 +212,6 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         """
         return {k:v  for k, v in inp if k is not None}
     # end def: _listToDict
-
-
 
 # end class(GatherTransformator):
 
