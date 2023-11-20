@@ -5,10 +5,22 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslato
 from .simpleTranslator                              import SimpleTransformator
 from .slicingTranslator                             import SlicingTransformator
 from .dotGeneralTranslator                          import DotGeneralTranslator
+from .broadcastinDimTranslator                      import BroadcastInDimTransformator
+from .selectNTranslator                             import SelectNTransformator
+from .gatherTranslator                              import GatherTransformator
+from .concatenateTranslator                         import ConcatenateTransformator
+from .convertElementTypeTranslator                  import ConvertElementTypeTransformator
+from .devicePutTranslator                           import DevicePutTransformator
 
 ALL_TRAFOS = [
     SimpleTransformator,
     SlicingTransformator,
     DotGeneralTranslator,
+    BroadcastInDimTransformator,
+    SelectNTransformator,
+    GatherTransformator,
+    ConcatenateTransformator,
+    ConvertElementTypeTransformator,
+    DevicePutTransformator,
 ]
 
