@@ -167,13 +167,6 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
             #
         #
         assert len(itSpaceVar) == len(offset_dims)
-        tInputs = []
-        tInputs.append( ('__in0', dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))) )
-
-        # Otherwise there is nothing that is used.
-        if(is_scalar_patch):
-            tMapRanges.append( ('__inDUMMY', '0:1') )
-        #
 
         # Now the output variables.
         tOutputs_ = []
@@ -185,20 +178,33 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
                 assert len(batch_dims) == 1
                 tOutputs_.append( loop_var )
         #
-        tOutputs = []
-        tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))) )         ; del tOutputs_
 
         # The code is also very simple
         tCode = '__out0 = __in0'
+        tName = f"_gather_map_{str(outVarNames[0])}_"
 
-        loop_body_state.add_mapped_tasklet(
-            name=f"_gather_map_{str(outVarNames[0])}_",
-            map_ranges=self._listToDict(tMapRanges),
-            inputs=self._listToDict(tInputs),
-            code=tCode,
-            outputs=self._listToDict(tOutputs),
-            external_edges=True,
-        )
+        if(is_scalar_patch):
+            inAN  = loop_body_state.add_read(inVarNames[0])
+            outAN = loop_body_state.add_write(outVarNames[0])
+            memlet = dace.Memlet(
+                    data=inVarNames[0],
+                    subset=', '.join(tInputs_),
+                    other_subset=', '.join(tOutputs_),
+            )
+            loop_body_state.add_nedge(inAN, outAN, memlet)
+
+        else:
+            tInputs  = [ ('__in0',  dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_)))   ]
+            tOutputs = [ ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))) ]
+            loop_body_state.add_mapped_tasklet(
+                name=tName,
+                map_ranges=self._listToDict(tMapRanges),
+                inputs=self._listToDict(tInputs),
+                code=tCode,
+                outputs=self._listToDict(tOutputs),
+                external_edges=True,
+            )
+        #
 
         return loop_end_state
     # end def: translateEqn
@@ -214,8 +220,4 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
     # end def: _listToDict
 
 # end class(GatherTranslator):
-
-
-
-
 
