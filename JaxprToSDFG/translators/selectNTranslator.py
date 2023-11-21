@@ -194,8 +194,9 @@ class SelectNTranslator(JaxIntrinsicTranslatorInterface):
                 tCode += '\n' + 'elif __cond == {i}: __out0 = __in{i}'
             #
 
-            # Now the undefined case
-            tCode += '\n' + 'else: __out0 = math.NAN'
+            # The out of bound case should generate an error or something like that.
+            #  But we left it undefined.
+            #tCode += '\n' + 'else: __out0 = '
         #
 
         # Now substitute the litterals into it, the condition can be ignored.
