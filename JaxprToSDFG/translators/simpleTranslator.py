@@ -189,7 +189,7 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
         # If the output is not a scalar then we need a map.
         if(not is_scalar):
-            tMapRanges = [ (f'__i{dim}', f'0:{N}')  for dim, N in enumerate(eqn.invars[0].aval.shape) ]
+            tMapRanges = [ (f'__i{dim}', f'0:{N}')  for dim, N in enumerate(eqn.outvars[0].aval.shape) ]
             if(len([x  for x in inVarNames if isinstance(x, str)]) == 0):
                 raise ValueError(f"Only literals as inputs is only allowed in the scalar case.")
             #
