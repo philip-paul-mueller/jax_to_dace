@@ -195,8 +195,10 @@ class SelectNTranslator(JaxIntrinsicTranslatorInterface):
             #
 
             # The out of bound case should generate an error or something like that.
-            #  But we left it undefined.
-            #tCode += '\n' + 'else: __out0 = '
+            #  In case of float returns `NAN` otherwhise the value is undefined.
+            if(str(eqn.outvars[0].aval.dtype).find("float") != -1):
+                tCode += '\n' + 'else: __out0 = math.nan'
+            #
         #
 
         # Now substitute the litterals into it, the condition can be ignored.
