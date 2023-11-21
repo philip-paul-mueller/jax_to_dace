@@ -144,12 +144,11 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
 
         # We are now checking if there is broadcasting going on.
-        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
+        no_literals = all([x is None  for x in inVarNames])
+        if(no_literals and (not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))]))):
             # There are shapes that differ, this might indicate broadcasting.
             #  So we have to check in how they are differents
 
-            if(any([x is None  for x in inVarNames])):
-                raise ValueError(f"Can not do broadcasting when one of the arguments is a literal.")
             if(len(inVarNames) != 2):
                 raise ValueError(f"Can only do broadcasting if there are two operands.")
             #
