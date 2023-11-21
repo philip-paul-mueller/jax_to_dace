@@ -94,7 +94,7 @@ class ConcatenateTranslator(JaxIntrinsicTranslatorInterface):
             )
 
             # Now we add  the connection between them
-            eqnState.add_edge(iInAN, inVar, outAN, outVarNames[0], iMemlet)
+            eqnState.add_nedge(iInAN, outAN, iMemlet)
 
             # Update the counter that we have copied
             allreadyCopied += thisInput
