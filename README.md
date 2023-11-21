@@ -56,7 +56,7 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [ ] `shift_right_logical`
 - [ ] `shift_left_logical`
 - [x] `concatenate`
-- [ ] `squeeze`
+- [x] `squeeze`
 - [x] `argmin`
 - [x] `argmax`
 - [x] `min`

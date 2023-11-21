@@ -97,7 +97,7 @@ class JaxprToSDFG:
     #
 
     def transform(self,
-                  jaxpr: ClosedJaxpr,
+                  jaxpr,
                   simplify = False,
                   auto_opt = False,
                   device: DeviceType = DeviceType.CPU,
@@ -121,6 +121,10 @@ class JaxprToSDFG:
 
         if(not jax.config.jax_enable_x64):
             raise ValueError("`x64` Support was disabled, you have to enable it by calling `jax.config.update('jax_enable_x64', True)` before anything else.")
+        #
+
+        if(not isinstance(jaxpr, ClosedJaxpr)):
+            raise TypeError(f"The `jaxpr` you passed was not a `ClosedJaxpr` instance, you have to applied `jax.make_jaxpr()` to it first and concretize it.")
         #
 
         if(auto_opt is True):
