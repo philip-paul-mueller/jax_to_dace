@@ -5,10 +5,11 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorIn
 
 from jax._src.core import JaxprEqn
 import dace
+import numpy as np
 from typing import Union, Any
 
 
-class SimpleTransformator(JaxIntrinsicTranslatorInterface):
+class SimpleTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles all the simple cases where only one tasklet is used.
 
     Current restrictions of the translator:
@@ -72,6 +73,10 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
                 "min":          "__out0 = min(__in0, __in1)",
                 "max":          "__out0 = max(__in0, __in1)",
         }
+
+        for n, o in [('ne', '!='), ('eq', '=='), ('ge', '>='), ('gt', '>'), ('lt', '<'), ('le', '<=')]:
+            self.m_binarryOps[n] = f'__out0 = (__in0) {o} (__in1)'
+        #
     # end def: __init__
 
 
@@ -123,42 +128,88 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
         # if we are scalar or not it is sufficient to check if the output is.
         is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
 
-        if(not (1 <= len(eqn.invars) <= 2)):
+        if(not (1 <= len(eqn.invars) <= 2)):        # Never remove this ceck the whole code depends on that.
             raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
         if(len(eqn.outvars) != 1):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
         if(outVarNames[0] is None):
             raise ValueError(f"The outut name must be a real variable.")
-        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
-           raise ValueError(f"Expected that all the input arguments have the same shape.")
+        if(not all([len(eqn.outvars[0].aval.shape) == len(eqn.invars[i].aval.shape)  for i in range(len(inVarNames)) if inVarNames[i] is not None])):
+            raise ValueError(f"Found shapes that differs in the number of dimensions: {eqn}.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
-        if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
-           raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvar[0].shape}) have the same shapes.")
         if(len(eqn.effects) != 0):
             raise ValueError(f"Can only handle equations without any side effects.")
         #
 
-        # We only need a map range if we are not scalar
+
+        # We are now checking if there is broadcasting going on.
+        if(not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars)) if inVarNames[i] is not None])):
+            # There are shapes that differ, this might indicate broadcasting.
+            #  So we have to check in how they are differents
+
+            if(any([x is None  for x in inVarNames])):
+                raise ValueError(f"Can not do broadcasting when one of the arguments is a literal.")
+            if(len(inVarNames) != 2):
+                raise ValueError(f"Can only do broadcasting if there are two operands.")
+            #
+
+            outShp  = tuple(eqn.outvars[0].aval.shape)  # Shape of the output.
+            inpShpL = tuple(eqn.invars[0].aval.shape)   # Shape of the left/first input
+            inpShpR = tuple(eqn.invars[1].aval.shape)   # Shape of the right/second input; this must be "expanded"
+            assert outShp == inpShpL                    # By our assumptions these checks have to pass
+            assert inpShpL != inpShpR
+            assert len(inpShpL) == len(inpShpR)
+            assert inpShpR[0] == 1      # At least this must hold, indicating padding.
+            assert inpShpL[-1] == inpShpR[-1]
+
+            # We now look for the place where they start to differ
+            #  but we have to do that from right to left, which is a bit of a pain.
+            spltPoint = None
+            for i in reversed(range(len(outShp))):
+                lftSize  = inpShpL[i]       # size of the array in dimension `i`
+                rghtSize = inpShpR[i]
+
+                # Depending if we found the splitting point, the checks are different.
+                if(spltPoint is None):              # The splitting point is not yet known
+                    if(lftSize != rghtSize):            # The first time the two dimension differs indicates the splitting point.
+                        assert rghtSize < lftSize
+                        spltPoint = i + 1               # We have to add since we want `inShpR[spltPoint:]` be all correct ones.
+                else:                               # The splitting point is known.
+                    assert rghtSize != 1
+                    assert 0 < rghtSize <= lftSize
+            assert spltPoint is not None
+            expandingBroadcastNeeded = True
+
+        else:
+            if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
+                raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvars[0].shape}) have the same shapes.")
+            expandingBroadcastNeeded = False
+        #
+
+        # If the output is not a scalar then we need a map.
         if(not is_scalar):
             tMapRanges = [ (f'__i{dim}', f'0:{N}')  for dim, N in enumerate(eqn.invars[0].aval.shape) ]
-
             if(len([x  for x in inVarNames if isinstance(x, str)]) == 0):
-                raise ValueError(f"Only literals as inputs is only allowed for the scalar case.")
+                raise ValueError(f"Only literals as inputs is only allowed in the scalar case.")
             #
         #
 
         tInputs = []
         for i in range(len(eqn.invars)):
-            if(inVarNames[i] is None):  # Input is a literal, so no data is needed.
+            if(inVarNames[i] is None):          # Input is a literal, so no data is needed.
                 tInputs.append((None, None))        # the two `None`s are for the connector name and the memlet, they simplyfy coding bellow.
                 continue
             #
 
-            # Depending if we have a scalar or not create another memlet, they differ in what they transport
-            #  The scalar one moves all, i.e. a single element and the array one is the usual map thing that iterates through everything.
-            if(is_scalar):  iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
-            else:           iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
+            # Depending on if we have a scalar or not the memlet creation differs.
+            #  The scalar one moves all, i.e. a single element and the array one is the usual map thingy that iterates through everything.
+            if(is_scalar):
+                iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
+            elif(expandingBroadcastNeeded and i != 0):
+                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join(['0'  for _ in range(spltPoint)] + [X[0]  for X in tMapRanges[spltPoint:] ]))
+            else:
+                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
             tInputs.append( (f'__in{i}', iMemlet) )
         #
 
@@ -237,7 +288,11 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
             jaxInVar = eqn.invars[i]
             if(jaxInVar.aval.shape == ()):
-                tCode = tCode.replace(f"__in{i}", str(jaxInVar.val.max()))       # I do not know a better way in that case
+                tVal = jaxInVar.val
+                if(isinstance(tVal, np.ndarray)):
+                    tVal = jaxInVar.val.max()
+                #
+                tCode = tCode.replace(f"__in{i}", str(tVal))       # I do not know a better way in that case
             else:
                 raise ValueError(f"Can not handle the literal case of shape: {jaxInVar.aval.shape}")
         # end for(i):
@@ -249,7 +304,7 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
         return tCode
     # end def: _writeTaskletCode
-# end class(SimpleTransformator):
+# end class(SimpleTranslator):
 
 
 

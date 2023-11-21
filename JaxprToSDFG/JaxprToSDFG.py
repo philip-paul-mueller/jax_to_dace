@@ -4,7 +4,8 @@ import dace
 
 from typing import Optional
 
-from jax._src.core import ClosedJaxpr, JaxprEqn, Jaxpr
+from dace.dtypes    import DeviceType
+from jax._src.core  import ClosedJaxpr, JaxprEqn, Jaxpr
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
 
@@ -95,28 +96,68 @@ class JaxprToSDFG:
     #   Translation interface
     #
 
-    def transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """Transforms the `jaxpr` into an SDFG and returns it.
+    def transform(self,
+                  jaxpr: ClosedJaxpr,
+                  simplify = False,
+                  auto_opt = False,
+                  device: DeviceType = DeviceType.CPU,
+    ) -> dace.SDFG:
+        """Transforms `jaxpr` into an `SDFG`.
+
+        By default the function just performs some verbatim style transformation.
+        By setting `simplify` to `True` the function will call `simplify()` on the generated `SDFG`.
+        Furthemore, by setting `auto_opt` to `True` the function will call `auto_optimize` on the `SDFG`.
+        If `auto_opt` is an integer, that many times `auto_optimize` will be applied.
+
+        Args:
+            jaxpr:      The `ClosedJaxpr` instance that should be translated.
+            simplify:   Apply simplify to the generated `SDFG`.
+            auto_opt:   Appy `auto_optimize` on the `SDFG` before returning it.
+            device:     For which device to optimize for.
         """
-        old64BitValue = jax.config.read("jax_enable_x64")       # It seams that there is no context manager for this (at least not a documented one).
+        import dace
+        from dace import SDFG
+        from dace.transformation.auto.auto_optimize import auto_optimize
+
+        if(not jax.config.jax_enable_x64):
+            raise ValueError("`x64` Support was disabled, you have to enable it by calling `jax.config.update('jax_enable_x64', True)` before anything else.")
+        #
+
+        if(auto_opt is True):
+            auto_opt = 1
+        elif(auto_opt is False  or  auto_opt is None):
+            auto_opt = 0
+        elif(isinstance(auto_opt, int)):
+            if(auto_opt < 0):
+                raise ValueError(f"Passed the negative value '{auto_opt}' as `auto_opt`.")
+            auto_opt = int(auto_opt)
+        else:
+            raise TypeError(f"Does not know how to handle `{auto_opt}` ({type(auto_opt)}) passed as `auto_opt`.")
+        assert isinstance(auto_opt, int) and (auto_opt >= 0)
+
         try:
-            jax.config.update("jax_enable_x64", True)           # Esnures that 64Bits are enabled this is what DaCe is implicitly assuming.
-            return self._transform(jaxpr)                       #  However, it would make more sense to check that during the creation of the jaxpr.
+            jaxSDFG: SDFG = self._transform(jaxpr)   # Perform the translation.
+            
+            if(simplify):
+                jaxSDFG.simplify()
+            for _ in range(auto_opt):
+                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=device)
+            #
+            jaxSDFG.validate()      # This function throws if an error is detected.
+
+            return jaxSDFG
+
         finally:
             self._clearState()
-            jax.config.update("jax_enable_x64", old64BitValue)
         #
-    #
+    # end def: transform
 
 
-    def __call__(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """An alias for `self.transform(jaxpr)`.
+    def __call__(self, jaxpr: ClosedJaxpr, *args, **kwargs) -> dace.SDFG:
+        """An alias for `self.transform(jaxpr, *args, **kwargs)`.
         """
-        return self.transform(jaxpr)
-    #
-
-
-
+        return self.transform(jaxpr, *args, **kwargs)
+    # end def: __call__
 
 
 
@@ -224,7 +265,7 @@ class JaxprToSDFG:
             self.m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
         #
         return
-    #
+    # end def: _createInitialInputs
 
 
     def _createReturnOutput(self, jaxpr: ClosedJaxpr):
@@ -254,7 +295,6 @@ class JaxprToSDFG:
             memlet = dace.Memlet.from_array(sVar, self.getArray(jVar))
             final_state.add_edge(jAN, None, sAN, None, memlet)                      # Now we add  the connection between them
         #
-
         return
     # end def: _createReturnOutput
 
@@ -356,7 +396,7 @@ class JaxprToSDFG:
         self._createReturnOutput(jaxpr)
 
         return self.m_sdfg
-    # end def: transform
+    # end def: _transform
 
 
     def _translateEqn(self,
@@ -376,13 +416,12 @@ class JaxprToSDFG:
         assert len(eqn.effects) == 0, "This class can only handle siode efect free equations."
 
         # Inside this state we will add everything that is related to this equation.
-        eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{id(eqn)}')
+        eqnState = self.m_sdfg.add_state_after(self.m_sdfgHead, label=f'{eqn.primitive.name}_{str(eqn.outvars[0])}__{id(eqn)}')
 
         # We now create the name list for the variables
         inVarNames  = self._createJaxVarList(eqn.invars )
         outVarNames = self._createJaxVarList(eqn.outvars)
         assert all([(o is not None) and (o in self.m_sdfg.arrays)  for o in outVarNames])
-
 
         # Now we look for the translator that can handle the primitive
         for eqnTranslator in self.m_eqnTranslators:
