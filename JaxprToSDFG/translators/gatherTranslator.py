@@ -11,7 +11,7 @@ from typing import Union, Any
 
 
 
-class GatherTransformator(JaxIntrinsicTranslatorInterface):
+class GatherTranslator(JaxIntrinsicTranslatorInterface):
     """This implements the `select_n` Jax intrinsic which acts as a generalized `where`.
 
     Its general notation is:
@@ -28,7 +28,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.select_n.html#jax.lax.select_n
 
     Notes:
-        This class is based on an earlier version of the `SimpleTransformator` class.
+        This class is based on an earlier version of the `SimpleTranslator` class.
     """
     __slots__ = ()
 
@@ -213,7 +213,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         return {k:v  for k, v in inp if k is not None}
     # end def: _listToDict
 
-# end class(GatherTransformator):
+# end class(GatherTranslator):
 
 
 

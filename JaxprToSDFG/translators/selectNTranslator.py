@@ -10,7 +10,7 @@ from typing import Union, Any
 
 
 
-class SelectNTransformator(JaxIntrinsicTranslatorInterface):
+class SelectNTranslator(JaxIntrinsicTranslatorInterface):
     """This implements the `select_n` Jax intrinsic which acts as a generalized `where`.
 
     Its general notation is:
@@ -27,7 +27,7 @@ class SelectNTransformator(JaxIntrinsicTranslatorInterface):
         https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.select_n.html#jax.lax.select_n
 
     Notes:
-        This class is based on an earlier version of the `SimpleTransformator` class.
+        This class is based on an earlier version of the `SimpleTranslator` class.
     """
     __slots__ = ()
 
@@ -224,7 +224,7 @@ class SelectNTransformator(JaxIntrinsicTranslatorInterface):
         dTypeStr = str(dType)
         return any([dTypeStr.startswith(x)  for x in ['uint', 'int']])
     # end def: _isIntDType
-# end class(SelectNTransformator):
+# end class(SelectNTranslator):
 
 
 

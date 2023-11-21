@@ -8,7 +8,7 @@ from dace import subsets
 from typing import Union
 
 
-class DevicePutTransformator(JaxIntrinsicTranslatorInterface):
+class DevicePutTranslator(JaxIntrinsicTranslatorInterface):
     """This class acts as a put device primitive.
 
     Currently this function just copies data around.
@@ -93,5 +93,5 @@ class DevicePutTransformator(JaxIntrinsicTranslatorInterface):
 
     # end def: translateEqn
 
-# end class(DevicePutTransformator):
+# end class(DevicePutTranslator):
 

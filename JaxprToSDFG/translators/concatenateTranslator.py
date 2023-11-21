@@ -7,7 +7,7 @@ import dace
 from typing import Union
 
 
-class ConcatenateTransformator(JaxIntrinsicTranslatorInterface):
+class ConcatenateTranslator(JaxIntrinsicTranslatorInterface):
     """This handles concatenation of arrays.
 
     In essence it implement `https://www.tensorflow.org/xla/operation_semantics#concatenate`.
@@ -103,5 +103,5 @@ class ConcatenateTransformator(JaxIntrinsicTranslatorInterface):
         return eqnState
     # end def: translateEqn
 
-# end class(ConcatenateTransformator):
+# end class(ConcatenateTranslator):
 

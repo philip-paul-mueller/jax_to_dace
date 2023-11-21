@@ -8,7 +8,7 @@ from dace import subsets
 from typing import Union
 
 
-class ConvertElementTypeTransformator(JaxIntrinsicTranslatorInterface):
+class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
     """This class acts as a type caster.
 
     Due to the nature of SDFG and Jax this function essentially just copies the data around.
@@ -87,5 +87,5 @@ class ConvertElementTypeTransformator(JaxIntrinsicTranslatorInterface):
         return eqnState
     # end def: translateEqn
 
-# end class(ConvertElementTypeTransformator):
+# end class(ConvertElementTypeTranslator):
 

@@ -9,7 +9,7 @@ import numpy as np
 from typing import Union, Any
 
 
-class SimpleTransformator(JaxIntrinsicTranslatorInterface):
+class SimpleTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles all the simple cases where only one tasklet is used.
 
     Current restrictions of the translator:
@@ -304,7 +304,7 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
         return tCode
     # end def: _writeTaskletCode
-# end class(SimpleTransformator):
+# end class(SimpleTranslator):
 
 
 
