@@ -47,7 +47,7 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `atan`
 - [ ] `copy`
 - [x] `convert_element_type`
-- [ ] `reshape`
+- [x] `reshape`
 - [x] `gather`
 - [ ] `random_seed`
 - [ ] `random_unwrap`
@@ -57,15 +57,15 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [ ] `shift_left_logical`
 - [x] `concatenate`
 - [ ] `squeeze`
-- [ ] `argmin`
-- [ ] `argmax`
-- [ ] `min`
-- [ ] `reduce_min`
-- [ ] `max`
-- [ ] `reduce_max`
+- [x] `argmin`
+- [x] `argmax`
+- [x] `min`
+- [x] `reduce_min`
+- [x] `max`
+- [x] `reduce_max`
 - [x] `abs`
 - [x] `sign`
-- [ ] `reduce_sum`
+- [x] `reduce_sum`
 - [x] `broadcast_in_dim`
 - [x] `select_n`
 - [x] `ne`
@@ -75,8 +75,8 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `le`
 - [x] `lt`
 - [ ] `sort`
-- [ ] `reduce_or`
-- [ ] `reduce_and`
+- [x] `reduce_or`
+- [x] `reduce_and`
 - [ ] `xla_pmap`
 - [ ] `xla_call`
 - [ ] `rev`

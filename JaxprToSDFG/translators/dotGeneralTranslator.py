@@ -29,7 +29,7 @@ class DotGeneralTranslator(JaxIntrinsicTranslatorInterface):
     ):
         """Tests if the equation can be handled by `self`.
         """
-        return str(eqn.primitive.name) == "dot_general"
+        return eqn.primitive.name == "dot_general"
     # end def: canHandle
 
 
@@ -78,7 +78,7 @@ class DotGeneralTranslator(JaxIntrinsicTranslatorInterface):
         if (len(lhs_shape) == 1 and len(rhs_shape) == 1) and contraction_dims == ((0,), (0,)):
             from dace.frontend.python.replacements import dot
             dot(None,
-                translator.m_sdfg,
+                translator.getSDFG(),
                 eqnState,
                 inVarNames[0],
                 inVarNames[1],
@@ -93,9 +93,9 @@ class DotGeneralTranslator(JaxIntrinsicTranslatorInterface):
             gY = eqnState.add_read(inVarNames[1])
             gZ = eqnState.add_write(outVarNames[0])
 
-            eqnState.add_edge(gX, None, libnode, '_a', dace.memlet.Memlet.from_array(gX.data, translator.m_sdfg.arrays[inVarNames[0]]))
-            eqnState.add_edge(gY, None, libnode, '_b', dace.memlet.Memlet.from_array(gY.data, translator.m_sdfg.arrays[inVarNames[1]]))
-            eqnState.add_edge(libnode, '_c', gZ, None, dace.memlet.Memlet.from_array(gZ.data, translator.m_sdfg.arrays[outVarNames[0]]))
+            eqnState.add_edge(gX, None, libnode, '_a', dace.memlet.Memlet.from_array(gX.data, translator.getArray(inVarNames[0])))
+            eqnState.add_edge(gY, None, libnode, '_b', dace.memlet.Memlet.from_array(gY.data, translator.getArray(inVarNames[1])))
+            eqnState.add_edge(libnode, '_c', gZ, None, dace.memlet.Memlet.from_array(gZ.data, translator.getArray(outVarNames[0])))
         else:
             # TODO: include more cases (see tensordot)
             raise NotImplementedError('Partially implemented dot_general')
