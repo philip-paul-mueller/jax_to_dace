@@ -100,7 +100,7 @@ class SlicingTransformator(JaxIntrinsicTranslatorInterface):
         )
 
         # Now we add  the connection between them
-        eqnState.add_edge(inAN, inVarNames[0], outAN, outVarNames[0], memlet)
+        eqnState.add_nedge(inAN, outAN, memlet)
 
         return eqnState
     # end def: translateEqn
