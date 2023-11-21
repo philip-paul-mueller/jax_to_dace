@@ -5,10 +5,14 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslato
 from .simpleTranslator                              import SimpleTransformator
 from .slicingTranslator                             import SlicingTransformator
 from .dotGeneralTranslator                          import DotGeneralTranslator
+from .reductionTranslator                           import ReductionTranslator
+from .reshapeTranslator                             import ReshapeTranslator
 
 ALL_TRAFOS = [
     SimpleTransformator,
     SlicingTransformator,
     DotGeneralTranslator,
+    ReductionTranslator,
+    ReshapeTranslator,
 ]
 
