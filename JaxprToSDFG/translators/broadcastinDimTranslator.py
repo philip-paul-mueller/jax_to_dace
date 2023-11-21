@@ -10,7 +10,7 @@ from typing import Union
 from math import prod
 
 
-class BroadcastInDimTransformator(JaxIntrinsicTranslatorInterface):
+class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
     """This handles the `broadcast_in_dim` intrinsic.
 
     It requieres two parameters `shape` and `broadcast_dimensions`, the following is taken from the jax source:
@@ -164,5 +164,5 @@ class BroadcastInDimTransformator(JaxIntrinsicTranslatorInterface):
         return eqnState
     # end def: translateEqn
 
-# end class(BroadcastInDimTransformator):
+# end class(BroadcastInDimTranslator):
 

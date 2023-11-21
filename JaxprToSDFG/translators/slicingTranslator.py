@@ -7,7 +7,7 @@ import dace
 from typing import Union
 
 
-class SlicingTransformator(JaxIntrinsicTranslatorInterface):
+class SlicingTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles slicing, it does this by copying the array.
 
     To be specifical it handles the `slice` intrinsic, which is slicing with a step size of 1.
@@ -100,10 +100,10 @@ class SlicingTransformator(JaxIntrinsicTranslatorInterface):
         )
 
         # Now we add  the connection between them
-        eqnState.add_edge(inAN, inVarNames[0], outAN, outVarNames[0], memlet)
+        eqnState.add_nedge(inAN, outAN, memlet)
 
         return eqnState
     # end def: translateEqn
 
-# end class(SlicingTransformator):
+# end class(SlicingTranslator):
 

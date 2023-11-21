@@ -11,7 +11,7 @@ from typing import Union, Any
 
 
 
-class GatherTransformator(JaxIntrinsicTranslatorInterface):
+class GatherTranslator(JaxIntrinsicTranslatorInterface):
     """This implements the `select_n` Jax intrinsic which acts as a generalized `where`.
 
     Its general notation is:
@@ -28,7 +28,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.select_n.html#jax.lax.select_n
 
     Notes:
-        This class is based on an earlier version of the `SimpleTransformator` class.
+        This class is based on an earlier version of the `SimpleTranslator` class.
     """
     __slots__ = ()
 
@@ -74,12 +74,15 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         """
         assert(len(eqn.invars) == 2)
 
-        output   = eqn.outvars[0]
-        outShape = eqn.outvars[0].aval.shape
-        inpArr   = eqn.invars[0]      # The array we want to gather from
-        inpShape = inpArr.aval.shape
-        idxArr   = eqn.invars[1]
-        idxShape = idxArr.aval.shape
+        outArrName = outVarNames[0]
+        outArr     = eqn.outvars[0]                 # This is the array we want to write to
+        outShape   = eqn.outvars[0].aval.shape
+        inpArrName = inVarNames[0]
+        inpArr     = eqn.invars[0]                  # The array we want to gather from
+        inpShape   = inpArr.aval.shape
+        idxArrName = inVarNames[1]                  # This is the array that contains the indexes, that we want to gather.
+        idxArr     = eqn.invars[1]
+        idxShape   = idxArr.aval.shape
 
         if(len(idxShape) != 2):
             raise NotImplementedError(f"Currently more than this is not supported.")
@@ -106,32 +109,41 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
             raise NotImplementedError(f"The process is only implemented for the case of one batch dimensions, but you have `{len(batch_dims)}` ({batch_dims})")
         #
 
-        # There is no single map that we can use here, instead we need a state loop, with a copy map.
-        #  Because of our assumption on the shape of `idxArr` from above, we know that we 
-        #  have to perfrom `idxShape[0]` many iterations.
+        # There is no single map that we can put here, instead we need a loop consisting of the state machine, with a copy map in it.
+        #  Because of our assumption on the shape of `idxArr` from above, we know that we have to perfrom `idxShape[0]` many iterations.
         SDFG: dace.SDFG = translator.getSDFG()
 
-        entry_state: dace.SDFGState       = SDFG.add_state(f'_gather_{str(outVarNames[0])}__meta_entry')
-        guard_state: dace.SDFGState       = SDFG.add_state(f'_gather_{str(outVarNames[0])}__guard')
-        loop_body_state: dace.SDFGState   = SDFG.add_state(f'_gather_{str(outVarNames[0])}__loop_body')
-        loop_end_state: dace.SDFGState    = SDFG.add_state(f'_gather_{str(outVarNames[0])}__loop_end')
-        loop_var                          = f'__gather_{str(outVarNames[0])}__loop_var'
+        loop_var    = f'__gather_{outArrName}__loop_var'    # This is the state loop index of the state machine.
+        nbStateIter = idxShape[0]                           #  This is the number of loops that we have to perfrom.
+
+        if(nbStateIter <= 0):
+            raise ValueError(f"In translation of `{str(eqn)}` have to perform the invalid number of `{nbStateIter}` state iterations.")
+        #
+
+        # These are the states that we need in this state machine.
+        entry_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__meta_entry')
+        guard_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__guard')
+        loop_body_state: dace.SDFGState   = SDFG.add_state(f'_gather_{outArrName}__loop_body')
+        loop_end_state: dace.SDFGState    = SDFG.add_state(f'_gather_{outArrName}__loop_end')
 
         # After the states we have to create the connections between them
         SDFG.add_edge(eqnState,        entry_state,     data=InterstateEdge())
-        SDFG.add_edge(entry_state,     guard_state,     data=InterstateEdge(assignments={loop_var: "0"}))      # We have to implement the loo
-        SDFG.add_edge(guard_state,     loop_end_state,  data=InterstateEdge(condition=f'{loop_var} == {idxShape[0]}'))
+        SDFG.add_edge(entry_state,     guard_state,     data=InterstateEdge(assignments={loop_var: "0"}))
+        SDFG.add_edge(guard_state,     loop_end_state,  data=InterstateEdge(condition=f'{loop_var} == {nbStateIter}'))
         SDFG.add_edge(loop_body_state, guard_state,     data=InterstateEdge(assignments={loop_var: f'{loop_var} + 1'}))
 
-        # We now have to construzt the assignment for the loop iteration
+        # These creates the variables `__i{dim}_gather_offset` that we use to read the index
+        #  that describes where the patch in the index starts.
         assignments = {}
         for i, dim in enumerate(start_index_map):
-            assignments[f'__i{dim}_gather_offset'] = f'{inVarNames[1]}[{loop_var}, {i}]'
+            assignments[f'__i{dim}_gather_offset'] = f'{idxArrName}[{loop_var}, {i}]'
         #
-        SDFG.add_edge(guard_state,     loop_body_state,
+        SDFG.add_edge(
+            src=guard_state,
+            dst=loop_body_state,
             data=InterstateEdge(
-                condition=f'{loop_var} != {idxShape[0]}',
-                assignments=assignments
+                condition=f'{loop_var} != {nbStateIter}',       # Check if the loop has ended.
+                assignments=assignments,
             )
         )
 
@@ -155,7 +167,7 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
                 itSpaceCnt += 1
             elif(dim in collapsed_slice_dims):
                 # It is collapsed so we only have to copy the element that is denoted.
-                #  However, it does not open a new iteration loop.
+                #  For this we are using the index array.
                 tInputs_.append( f'__i{dim}_gather_offset' )
 
             else:
@@ -167,13 +179,6 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
             #
         #
         assert len(itSpaceVar) == len(offset_dims)
-        tInputs = []
-        tInputs.append( ('__in0', dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))) )
-
-        # Otherwise there is nothing that is used.
-        if(is_scalar_patch):
-            tMapRanges.append( ('__inDUMMY', '0:1') )
-        #
 
         # Now the output variables.
         tOutputs_ = []
@@ -185,20 +190,33 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
                 assert len(batch_dims) == 1
                 tOutputs_.append( loop_var )
         #
-        tOutputs = []
-        tOutputs.append( ('__out0', dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))) )         ; del tOutputs_
 
         # The code is also very simple
         tCode = '__out0 = __in0'
+        tName = f"_gather_map_{outArrName}_"
 
-        loop_body_state.add_mapped_tasklet(
-            name=f"_gather_map_{str(outVarNames[0])}_",
-            map_ranges=self._listToDict(tMapRanges),
-            inputs=self._listToDict(tInputs),
-            code=tCode,
-            outputs=self._listToDict(tOutputs),
-            external_edges=True,
-        )
+        if(is_scalar_patch):
+            inAN  = loop_body_state.add_read(inpArrName)
+            outAN = loop_body_state.add_write(outArrName)
+            memlet = dace.Memlet(
+                    data=inVarNames[0],
+                    subset=', '.join(tInputs_),
+                    other_subset=', '.join(tOutputs_),
+            )
+            loop_body_state.add_nedge(inAN, outAN, memlet)
+
+        else:
+            tInputs  = [ ('__in0',  dace.Memlet.simple(inpArrName, ', '.join(tInputs_)))   ]
+            tOutputs = [ ('__out0', dace.Memlet.simple(outArrName, ', '.join(tOutputs_))) ]
+            loop_body_state.add_mapped_tasklet(
+                name=tName,
+                map_ranges=self._listToDict(tMapRanges),
+                inputs=self._listToDict(tInputs),
+                code=tCode,
+                outputs=self._listToDict(tOutputs),
+                external_edges=True,
+            )
+        #
 
         return loop_end_state
     # end def: translateEqn
@@ -213,9 +231,5 @@ class GatherTransformator(JaxIntrinsicTranslatorInterface):
         return {k:v  for k, v in inp if k is not None}
     # end def: _listToDict
 
-# end class(GatherTransformator):
-
-
-
-
+# end class(GatherTranslator):
 

@@ -4,7 +4,8 @@ import dace
 
 from typing import Optional
 
-from jax._src.core import ClosedJaxpr, JaxprEqn, Jaxpr
+from dace.dtypes    import DeviceType
+from jax._src.core  import ClosedJaxpr, JaxprEqn, Jaxpr
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
 
@@ -95,29 +96,68 @@ class JaxprToSDFG:
     #   Translation interface
     #
 
-    def transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """Transforms the `jaxpr` into an SDFG and returns it.
+    def transform(self,
+                  jaxpr: ClosedJaxpr,
+                  simplify = False,
+                  auto_opt = False,
+                  device: DeviceType = DeviceType.CPU,
+    ) -> dace.SDFG:
+        """Transforms `jaxpr` into an `SDFG`.
+
+        By default the function just performs some verbatim style transformation.
+        By setting `simplify` to `True` the function will call `simplify()` on the generated `SDFG`.
+        Furthemore, by setting `auto_opt` to `True` the function will call `auto_optimize` on the `SDFG`.
+        If `auto_opt` is an integer, that many times `auto_optimize` will be applied.
+
+        Args:
+            jaxpr:      The `ClosedJaxpr` instance that should be translated.
+            simplify:   Apply simplify to the generated `SDFG`.
+            auto_opt:   Appy `auto_optimize` on the `SDFG` before returning it.
+            device:     For which device to optimize for.
         """
-        old64BitValue = jax.config.read("jax_enable_x64")       # It seams that there is no context manager for this (at least not a documented one).
-        self._clearState()
-        try:
-            jax.config.update("jax_enable_x64", True)           # Esnures that 64Bits are enabled this is what DaCe is implicitly assuming.
-            return self._transform(jaxpr)                       #  However, it would make more sense to check that during the creation of the jaxpr.
-        finally:
-            #self._clearState()
-            jax.config.update("jax_enable_x64", old64BitValue)
+        import dace
+        from dace import SDFG
+        from dace.transformation.auto.auto_optimize import auto_optimize
+
+        if(not jax.config.jax_enable_x64):
+            raise ValueError("`x64` Support was disabled, you have to enable it by calling `jax.config.update('jax_enable_x64', True)` before anything else.")
         #
-    #
+
+        if(auto_opt is True):
+            auto_opt = 1
+        elif(auto_opt is False  or  auto_opt is None):
+            auto_opt = 0
+        elif(isinstance(auto_opt, int)):
+            if(auto_opt < 0):
+                raise ValueError(f"Passed the negative value '{auto_opt}' as `auto_opt`.")
+            auto_opt = int(auto_opt)
+        else:
+            raise TypeError(f"Does not know how to handle `{auto_opt}` ({type(auto_opt)}) passed as `auto_opt`.")
+        assert isinstance(auto_opt, int) and (auto_opt >= 0)
+
+        try:
+            jaxSDFG: SDFG = self._transform(jaxpr)   # Perform the translation.
+            
+            if(simplify):
+                jaxSDFG.simplify()
+            for _ in range(auto_opt):
+                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=device)
+            #
+            jaxSDFG.validate()      # This function throws if an error is detected.
+
+            return jaxSDFG
+
+        finally:
+            self._clearState()
+        #
+    # end def: transform
 
 
-    def __call__(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """An alias for `self.transform(jaxpr)`.
+    def __call__(self, jaxpr: ClosedJaxpr, *args, **kwargs) -> dace.SDFG:
+        """An alias for `self.transform(jaxpr, *args, **kwargs)`.
         """
-        return self.transform(jaxpr)
-    #
-
-
-
+        return self.transform(jaxpr, *args, **kwargs)
+    # end def: __call__
 
 
 
@@ -199,66 +239,6 @@ class JaxprToSDFG:
     # end def: _addArray
 
 
-    def _addViewLike(self, likeThis, newName = None, newShape = None):
-        """This function allows to create view that is is similar to `likeThis`.
-
-        If `likeThis` is a string it is assumed to name an SDFG Array.
-        If `newName` is `None` a new name will be derived.
-
-
-        Args:
-            likeThis:       Take anything not specified from this template.
-            newName:        The new name that should be used for it.
-            newShape:       The shape that should be used.
-
-        Notes:
-            The number of elements given by `likeThis` must not match `newShape`.
-        """
-        if isinstance(likeThis, jax._src.core.Var):
-            likeThis = str(likeThis)
-            assert likeThis in self.m_jaxNameMap, f"Expected to find a mapping for jax variable '{likeThis}' to a SDFG array, but it is not known."
-            srcArray: dace.data.Array = self.m_sdfg.arrays[ self.m_jaxNameMap[likeThis] ]
-        elif isinstance(arg, jax._src.core.Literal):
-            raise NotImplementedError(f"Jax Literals are not yet implemented.")
-        elif isinstance(likeThis, str):
-            assert likeThis in self.m_sdfg.arrays
-            srcArray: dace.data.Array = self.m_sdfg.arrays[likeThis]
-        else:
-            raise TypeError(f"Does not know how to handle {type(arg)}.")
-        #
-
-        if(newName is None):
-            newNameTmpl = f'{likeThis}_view'
-            for i in range(1, 100):
-                newName = newNameTmpl + '_' + str(i)
-                if(newName not in self.m_sdfg.arrays):
-                    break
-            else:
-                raise ValueError(f"Failed to derive a new name for '{likeThis}'")
-        #
-        assert isinstance(newName, str)
-        assert len(newName) != 0
-
-        if(newName in self.m_sdfg.arrays):
-            raise ValueError(f"Requested to generate a view with name `{newName}` but it is already taken.")
-        #
-
-        dType   = srcArray.dtype
-        shape   = srcArray.shape if newShape is None else newShape
-        strides = None
-        offset  = None
-        transient = True
-
-        self.m_sdfg.add_view(
-                name=newName,
-                shape=shape,
-                dtype=dType,
-                strides=strides,
-                offset=offset)
-        return newName
-    # end def: _addViewLike
-
-
     def _createInitialInputs(self, jaxpr: ClosedJaxpr):
         """Creates the initial inputs, i.e. arguments to the jax expression.
 
@@ -285,7 +265,7 @@ class JaxprToSDFG:
             self.m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
         #
         return
-    #
+    # end def: _createInitialInputs
 
 
     def _createReturnOutput(self, jaxpr: ClosedJaxpr):
@@ -416,7 +396,7 @@ class JaxprToSDFG:
         self._createReturnOutput(jaxpr)
 
         return self.m_sdfg
-    # end def: transform
+    # end def: _transform
 
 
     def _translateEqn(self,
@@ -442,7 +422,6 @@ class JaxprToSDFG:
         inVarNames  = self._createJaxVarList(eqn.invars )
         outVarNames = self._createJaxVarList(eqn.outvars)
         assert all([(o is not None) and (o in self.m_sdfg.arrays)  for o in outVarNames])
-
 
         # Now we look for the translator that can handle the primitive
         for eqnTranslator in self.m_eqnTranslators:
