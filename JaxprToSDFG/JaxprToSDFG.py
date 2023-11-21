@@ -119,6 +119,10 @@ class JaxprToSDFG:
         from dace import SDFG
         from dace.transformation.auto.auto_optimize import auto_optimize
 
+        if(not jax.config.jax_enable_x64):
+            raise ValueError("`x64` Support was disabled, you have to enable it by calling `jax.config.update('jax_enable_x64', True)` before anything else.")
+        #
+
         if(auto_opt is True):
             auto_opt = 1
         elif(auto_opt is False  or  auto_opt is None):
