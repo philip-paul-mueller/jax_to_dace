@@ -150,11 +150,13 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
 
             if(any([x is None  for x in inVarNames])):
                 raise ValueError(f"Can not do broadcasting when one of the arguments is a literal.")
+            if(len(inVarNames) != 2):
+                raise ValueError(f"Can only do broadcasting if there are two operands.")
             #
 
             outShp  = tuple(eqn.outvars[0].aval.shape)  # Shape of the output.
-            inpShpL = tuple(eqn.invars[0].aval.shape)   # shape of the left/first input
-            inpShpR = tuple(eqn.invars[1].aval.shape)   # shape of the right/second input; this must be "expanded"
+            inpShpL = tuple(eqn.invars[0].aval.shape)   # Shape of the left/first input
+            inpShpR = tuple(eqn.invars[1].aval.shape)   # Shape of the right/second input; this must be "expanded"
             assert outShp == inpShpL                    # By our assumptions these checks have to pass
             assert inpShpL != inpShpR
             assert len(inpShpL) == len(inpShpR)
@@ -168,15 +170,15 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
                 lftSize  = inpShpL[i]       # size of the array in dimension `i`
                 rghtSize = inpShpR[i]
 
-                if(spltPoint is None):              # Depending if we found the splitting point, the checks are different.
-                    if(lftSize != rghtSize):        # We found the splitting point.
+                # Depending if we found the splitting point, the checks are different.
+                if(spltPoint is None):              # The splitting point is not yet known
+                    if(lftSize != rghtSize):            # The first time the two dimension differs indicates the splitting point.
                         assert rghtSize < lftSize
-                        spltPoint = i + 1           # We have to add since we want `inShpR[spltPoint:]` be all correct ones.
-                else:
+                        spltPoint = i + 1               # We have to add since we want `inShpR[spltPoint:]` be all correct ones.
+                else:                               # The splitting point is known.
                     assert rghtSize != 1
                     assert 0 < rghtSize <= lftSize
             assert spltPoint is not None
-            #
             expandingBroadcastNeeded = True
 
         else:
@@ -185,24 +187,23 @@ class SimpleTransformator(JaxIntrinsicTranslatorInterface):
             expandingBroadcastNeeded = False
         #
 
-        # We only need a map range if we are not scalar
+        # If the output is not a scalar then we need a map.
         if(not is_scalar):
             tMapRanges = [ (f'__i{dim}', f'0:{N}')  for dim, N in enumerate(eqn.invars[0].aval.shape) ]
-
             if(len([x  for x in inVarNames if isinstance(x, str)]) == 0):
-                raise ValueError(f"Only literals as inputs is only allowed for the scalar case.")
+                raise ValueError(f"Only literals as inputs is only allowed in the scalar case.")
             #
         #
 
         tInputs = []
         for i in range(len(eqn.invars)):
-            if(inVarNames[i] is None):  # Input is a literal, so no data is needed.
+            if(inVarNames[i] is None):          # Input is a literal, so no data is needed.
                 tInputs.append((None, None))        # the two `None`s are for the connector name and the memlet, they simplyfy coding bellow.
                 continue
             #
 
-            # Depending if we have a scalar or not create another memlet, they differ in what they transport
-            #  The scalar one moves all, i.e. a single element and the array one is the usual map thing that iterates through everything.
+            # Depending on if we have a scalar or not the memlet creation differs.
+            #  The scalar one moves all, i.e. a single element and the array one is the usual map thingy that iterates through everything.
             if(is_scalar):
                 iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
             elif(expandingBroadcastNeeded and i != 0):
