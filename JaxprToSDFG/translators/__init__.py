@@ -11,6 +11,7 @@ from .gatherTranslator                              import GatherTranslator
 from .concatenateTranslator                         import ConcatenateTranslator
 from .convertElementTypeTranslator                  import ConvertElementTypeTranslator
 from .devicePutTranslator                           import DevicePutTranslator
+from .pjitTranslator                                import PJITTranslator
 
 ALL_TRAFOS = [
     SimpleTranslator,
@@ -22,5 +23,6 @@ ALL_TRAFOS = [
     ConcatenateTranslator,
     ConvertElementTypeTranslator,
     DevicePutTranslator,
+    PJITTranslator,
 ]
 
