@@ -5,6 +5,8 @@ from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslato
 from .simpleTranslator                              import SimpleTranslator
 from .slicingTranslator                             import SlicingTranslator
 from .dotGeneralTranslator                          import DotGeneralTranslator
+from .reductionTranslator                           import ReductionTranslator
+from .reshapeTranslator                             import ReshapeTranslator
 from .broadcastinDimTranslator                      import BroadcastInDimTranslator
 from .selectNTranslator                             import SelectNTranslator
 from .gatherTranslator                              import GatherTranslator
@@ -18,6 +20,8 @@ ALL_TRAFOS = [
     SimpleTranslator,
     SlicingTranslator,
     DotGeneralTranslator,
+    ReductionTranslator,
+    ReshapeTranslator,
     BroadcastInDimTranslator,
     SelectNTranslator,
     GatherTranslator,
