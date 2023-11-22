@@ -111,25 +111,7 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"This function assumes that `broadcast_dimensions` is sorted but it was not (`{bDims}`)")
         #
 
-        if((not (inpIsLiteral or inpIsScalar)) and ((len(bDims) == 1) or (prod(inShape) == prod(outShape)))):
-            # The code is inspired from the `reshape()` function of the python frontend
-            # TODO: Probably poting to view, but this allows to bypass aliasing.
-            inName    = inVarNames[0]
-            outName   = outVarNames[0]
-            inArr     = translator.getArray(inName)
-            outArr    = translator.getArray(outName)
-            inSet     = subsets.Range.from_array(inArr)
-            outSet    = subsets.Range.from_array(outArr)
-            readNode  = eqnState.add_read(inName)
-            writeNode = eqnState.add_write(outName)
-            memlet    = dace.Memlet(data=inName, subset=inSet, other_subset=outSet)
-
-            eqnState.add_nedge(readNode, writeNode, data=memlet)
-
-        elif((not (inpIsLiteral or inpIsScalar)) and (len(bDims) != 1)):
-            raise NotImplementedError(f"Multiple broadcast dimensions are not implemented.")
-
-        elif(inpIsLiteral or inpIsScalar):
+        if(inpIsLiteral or inpIsScalar):
             # This code is inspired from the `numpy.full` function.
             inName    = inVarNames[0]
             outName   = outVarNames[0]
@@ -150,7 +132,7 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             #
 
             eqnState.add_mapped_tasklet(
-                '_fill_',
+                f'_scalar_broadcast_{str(eqn.outvars[0])}',
                 map_ranges={f"__i{dim}": f"0:{s}" for dim, s in enumerate(outShape)},
                 inputs=inputs,
                 code=f"__out = {tVal}",
@@ -158,7 +140,27 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
                 external_edges=True
             )
         else:
-            raise NotImplementedError(f"This case is not implemented.")
+            # We are using a map to copy the data arround. For thsi we will iterate through the entier output domain
+            tMapRanges = []
+            tOutputs_  = []
+            for dim, slice_size in enumerate(outShape):
+                tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
+                tOutputs_.append( tMapRanges[-1][0] )
+            #
+
+            tInputs_ = []
+            for dim, mapTo in enumerate(bDims):
+                tInputs_.append( tMapRanges[mapTo][0] )
+            #
+
+            eqnState.add_mapped_tasklet(
+                f'_broadcast_{str(eqn.outvars[0])}',
+                map_ranges={k: v  for k, v in tMapRanges},
+                inputs=dict(__in=dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))),
+                code='__out = __in',
+                outputs=dict(__out=dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))),
+                external_edges=True
+            )
         #
 
         return eqnState
