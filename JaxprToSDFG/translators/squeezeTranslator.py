@@ -44,7 +44,6 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
     ):
         """Translate eqn into an SDFG that is created inside `eqnState`.
 
-
         Args:
             translator:     The `JaxprToSDFG` instance that is respnsible for the translation.
             inVarNames:     List of the names of the arrays created inside the SDFG for the inpts.
@@ -78,7 +77,6 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Strange some dimensions that with a different length than one should be removed, shoudl remove: {[(dim, inShape[dtr])  for dim, dtr in enumerate(dims_to_remove)]}")
         #
 
-
         # The map ranges will go through all the output dimensions.
         tMapRanges = []
         for dim, dim_size in enumerate(outShape):
@@ -104,7 +102,7 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
         assert itCnt == len(tMapRanges)
 
         tName = f'_squeeze_{outVarNames[0]}'
-        tCode = '__in = __out'
+        tCode = '__out = __in'
 
         eqnState.add_mapped_tasklet(
             name=tName,
