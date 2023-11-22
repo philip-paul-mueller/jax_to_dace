@@ -144,8 +144,8 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
 
         # We are now checking if there is broadcasting going on.
-        no_literals = all([x is None  for x in inVarNames])
-        if(no_literals and (not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))]))):
+        has_some_literals = any([x is None  for x in inVarNames])
+        if((not has_some_literals) and (not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))]))):
             # There are shapes that differ, this might indicate broadcasting.
             #  So we have to check in how they are differents
 
@@ -182,7 +182,7 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
         else:
             if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
-                raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvars[0].shape}) have the same shapes.")
+                raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvars[0].aval.shape}) have the same shapes.")
             expandingBroadcastNeeded = False
         #
 
