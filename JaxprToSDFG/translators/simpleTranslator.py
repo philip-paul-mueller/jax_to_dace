@@ -37,6 +37,7 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
         self.m_unarryOps = {
                 "pos":          "__out0 = +(__in0)",
                 "neg":          "__out0 = -(__in0)",
+                "not":          "__out0 = not (__in0)",
 
                 "floor":        "__out0 = floor(__in0)",
                 "ceil":         "__out0 = ceil(__in0)",
@@ -66,6 +67,9 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
                 "div":          "__out0 = (__in0)/(__in1)",
 
                 "rem":          "__out0 = (__in0)%(__in1)",
+
+                "and":          "__out0 = (__in0) and (__in1)",
+                "or":           "__out0 = (__in0) or  (__in1)",
 
                 "pow":          "__out0 = (__in0)**(__in1)",
                 "ipow":         "__out0 = (__in0)**(int(__in1))",
