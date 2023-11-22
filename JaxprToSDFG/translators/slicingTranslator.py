@@ -73,34 +73,40 @@ class SlicingTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Does not allow for literals in the input arguments.")
         #
 
-        inAVal  = eqn.invars[0].aval            # The abstract value
-        inShape = inAVal.shape                  # The shape of the inpt value.
+        inAVal   = eqn.invars[0].aval            # The abstract value
+        inShape  = inAVal.shape                  # The shape of the inpt value.
+        outAVal  = eqn.outvars[0].aval
+        outShape = outAVal.shape
 
         # Now we get the parameters
         sStart  = eqn.params['start_indices']                   # Fist index to slice
         sStop   = eqn.params['limit_indices']                   # Last index to slice
         sStride = eqn.params['strides']                         # The stride i.e. step index, might be `None` to indicate that it is all one.
-        sStep   = tuple([1  for _ in range(len(inShape))])      # The step size which is not passed, by jax.
 
         # We require that stride is `None`
         if(sStride is not None):
             raise NotImplementedError(f"The case of a non-None Stride in slicing is not implemented.")
         #
 
-        # Create access nodes for the input and output
-        inAN  = eqnState.add_read(inVarNames[0])
-        outAN = eqnState.add_write(outVarNames[0])
+        tMapRanges, tOutputs_ = [], []
+        for dim in range(len(outShape)):
+            tMapRanges.append( (f'__i{dim}', f'0:{sStop[dim] - sStart[dim]}') )
+            tOutputs_.append( tMapRanges[-1][0] )
+        #
 
-        # Now we create the Memlet that we will use for copying, we will use the `other_subset` feature for this.
-        #  The doc says strings are not efficient, but they are simpler.
-        memlet = dace.Memlet(
-                data=inVarNames[0],
-                subset=', '.join([f'{sStart[i]}:{sStop[i]}:{sStep[i]}'  for i in range(len(sStart))]),
-                other_subset=', '.join([f'0:{sStop[i] - sStart[i]}'  for i in range(len(sStart))]),
+        tInputs_ = []
+        for (mapItVar, _), startIdx in zip(tMapRanges, sStart):
+            tInputs_.append( f'{mapItVar} + {startIdx}' )
+        #
+
+        eqnState.add_mapped_tasklet(
+            f'_slicing_{str(eqn.outvars[0])}',
+            map_ranges={k: v  for k, v in tMapRanges},
+            inputs=dict(__in=dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))),
+            code='__out = __in',
+            outputs=dict(__out=dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))),
+            external_edges=True
         )
-
-        # Now we add  the connection between them
-        eqnState.add_nedge(inAN, outAN, memlet)
 
         return eqnState
     # end def: translateEqn
