@@ -16,6 +16,7 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
 
     In previous versions this created a state machine.
     However, in newer version it will create multiple maps, i.e. unroll the loop statically.
+    To see how this is done, check out commit `ba91e64`.
 
     Notes:
         https://www.tensorflow.org/xla/operation_semantics#gather
@@ -100,116 +101,117 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
             raise NotImplementedError(f"The process is only implemented for the case of one batch dimensions, but you have `{len(batch_dims)}` ({batch_dims})")
         #
 
-        # There is no single map that we can put here, instead we need a loop consisting of the state machine, with a copy map in it.
-        #  Because of our assumption on the shape of `idxArr` from above, we know that we have to perfrom `idxShape[0]` many iterations.
+        # The operation can not be done in a single map, however, it is possible to create different maps, that does the job.
+        #  To keep documentation simple we will still refere to the different maps as `state`.
         SDFG: dace.SDFG = translator.getSDFG()
 
-        loop_var    = f'__gather_{outArrName}__loop_var'    # This is the state loop index of the state machine.
-        nbStateIter = idxShape[0]                           #  This is the number of loops that we have to perfrom.
+        # This is the number of maps that we need to create.
+        nbStateIter = idxShape[0]
 
         if(nbStateIter <= 0):
             raise ValueError(f"In translation of `{str(eqn)}` have to perform the invalid number of `{nbStateIter}` state iterations.")
         #
 
-        # These are the states that we need in this state machine.
-        entry_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__meta_entry')
-        guard_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__guard')
-        loop_body_state: dace.SDFGState   = SDFG.add_state(f'_gather_{outArrName}__loop_body')
-        loop_end_state: dace.SDFGState    = SDFG.add_state(f'_gather_{outArrName}__loop_end')
-
-        # After the states we have to create the connections between them
-        SDFG.add_edge(eqnState,        entry_state,     data=InterstateEdge())
-        SDFG.add_edge(entry_state,     guard_state,     data=InterstateEdge(assignments={loop_var: "0"}))
-        SDFG.add_edge(guard_state,     loop_end_state,  data=InterstateEdge(condition=f'{loop_var} == {nbStateIter}'))
-        SDFG.add_edge(loop_body_state, guard_state,     data=InterstateEdge(assignments={loop_var: f'{loop_var} + 1'}))
-
-        # These creates the variables `__i{dim}_gather_offset` that we use to read the index
-        #  that describes where the patch in the index starts.
-        assignments = {}
-        for i, dim in enumerate(start_index_map):
-            assignments[f'__i{dim}_gather_offset'] = f'{idxArrName}[{loop_var}, {i}]'
-        #
-        SDFG.add_edge(
-            src=guard_state,
-            dst=loop_body_state,
-            data=InterstateEdge(
-                condition=f'{loop_var} != {nbStateIter}',       # Check if the loop has ended.
-                assignments=assignments,
-            )
-        )
+        # We need a second state, since we have to define some symbols and for this we need an `InterstateEdge`
+        #  The original state will contain nothing and all maps are added to the new state.
+        gather_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__state')
 
         # This is the corrected slice size window, where we have colapsed away 1 sized dimensions.
-        #  It is basically hwo much is copied in each iteration of the copy state machine.
+        #  It is basically hwo much is copied in each iteration of the copy state machine (actually parallel maps).
         #  If it is the empty tuple, then we have to copy around a scalar.
         corr_slice_size = tuple([ss  for i, ss in enumerate(slice_sizes) if i not in collapsed_slice_dims])
         assert len(corr_slice_size) == len(offset_dims)
         is_scalar_patch = corr_slice_size == ()
 
-        tMapRanges = []         # Range of the map
-        tInputs_   = []         # Access elements.
-        itSpaceCnt = 0          # Counter for generating iteration space.
-        itSpaceVar = []
-        for dim, slice_size in enumerate(slice_sizes):
-            if(dim not in start_index_map):
-                # This dimension is fully copied, by the map.
-                tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
-                tInputs_.append( tMapRanges[-1][0] )
-                itSpaceVar.append( tInputs_[-1] )
-                itSpaceCnt += 1
-            elif(dim in collapsed_slice_dims):
-                # It is collapsed so we only have to copy the element that is denoted.
-                #  For this we are using the index array.
-                tInputs_.append( f'__i{dim}_gather_offset' )
+        # These are all the variables, and their definitions we need in the state machine.
+        #  These are the indexes that we read from the index array.
+        assignments: dict[str, str] = {}
 
-            else:
-                # The dimension is not collapsed, but there is an offset, it also opens an iteration space
-                tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
-                tInputs_.append( tMapRanges[-1][0] + f" + __i{dim}_gather_offset" )
-                itSpaceVar.append( tMapRanges[-1][0] )
-                itSpaceCnt += 1
+        # We will now statically unrolle the state machine.
+        for loop_var in range(nbStateIter):
+            # Looking up the indexes that we need.
+            stateVars: dict[int, str] = {}
+            for i, dim in enumerate(start_index_map):
+                stateVar = f'__gather_{outArrName}_s{loop_var}_i{dim}'          # This is the variable name that tell us what start index we have to use for dimension `dim` in state `loop_var`.
+                stateVars[dim] = stateVar
+                assignments[stateVar] = f'{idxArrName}[{loop_var}, {i}]'        # Now store assignement for the later creation of teh interstate edge.
+                del stateVar
             #
-        #
-        assert len(itSpaceVar) == len(offset_dims)
 
-        # Now the output variables.
-        tOutputs_ = []
-        for dim in range(len(outShape)):
-            if(dim in offset_dims):
-                iDim = offset_dims.index(dim)
-                tOutputs_.append( itSpaceVar[iDim] )
+            tMapRanges = []         # Range of the map
+            tInputs_   = []         # Access elements.
+            itSpaceCnt = 0          # Counter for generating iteration space.
+            itSpaceVar = []
+
+            for dim, slice_size in enumerate(slice_sizes):
+                if(dim not in start_index_map):
+                    # This dimension is fully copied, by the map.
+                    tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
+                    tInputs_.append( tMapRanges[-1][0] )
+                    itSpaceVar.append( tInputs_[-1] )
+                    itSpaceCnt += 1
+                elif(dim in collapsed_slice_dims):
+                    # It is collapsed so we only have to copy the element that is denoted.
+                    #  For this we are using the index array.
+                    tInputs_.append( stateVars[dim] )
+
+                else:
+                    # The dimension is not collapsed, but there is an offset, it also opens an iteration space
+                    tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
+                    tInputs_.append( tMapRanges[-1][0] + " + " + stateVars[dim] )
+                    itSpaceVar.append( tMapRanges[-1][0] )
+                    itSpaceCnt += 1
+                #
+            #
+            assert len(itSpaceVar) == len(offset_dims)
+
+            # Now the output variables.
+            tOutputs_ = []
+            for dim in range(len(outShape)):
+                if(dim in offset_dims):
+                    iDim = offset_dims.index(dim)
+                    tOutputs_.append( itSpaceVar[iDim] )
+                else:
+                    assert len(batch_dims) == 1
+                    tOutputs_.append( str(loop_var) )
+            #
+
+            # The code is also very simple
+            tCode = '__out0 = __in0'
+            tName = f"_gather_map_{outArrName}_state{loop_var}_"
+
+            if(is_scalar_patch):
+                inAN  = gather_state.add_read(inpArrName)
+                outAN = gather_state.add_write(outArrName)
+                memlet = dace.Memlet(
+                        data=inVarNames[0],
+                        subset=', '.join(tInputs_),
+                        other_subset=', '.join(tOutputs_),
+                )
+                gather_state.add_nedge(inAN, outAN, memlet)
+
             else:
-                assert len(batch_dims) == 1
-                tOutputs_.append( loop_var )
-        #
+                tInputs  = [ ('__in0',  dace.Memlet.simple(inpArrName, ', '.join(tInputs_)))   ]
+                tOutputs = [ ('__out0', dace.Memlet.simple(outArrName, ', '.join(tOutputs_))) ]
+                gather_state.add_mapped_tasklet(
+                    name=tName,
+                    map_ranges=self._listToDict(tMapRanges),
+                    inputs=self._listToDict(tInputs),
+                    code=tCode,
+                    outputs=self._listToDict(tOutputs),
+                    external_edges=True,
+                )
+            # end if: is scalar or not.
+        # end for(loop_var):
 
-        # The code is also very simple
-        tCode = '__out0 = __in0'
-        tName = f"_gather_map_{outArrName}_"
+        # Now we create connect the two states together.
+        SDFG.add_edge(
+            src=eqnState,
+            dst=gather_state,
+            data=InterstateEdge(assignments=assignments)
+        )
 
-        if(is_scalar_patch):
-            inAN  = loop_body_state.add_read(inpArrName)
-            outAN = loop_body_state.add_write(outArrName)
-            memlet = dace.Memlet(
-                    data=inVarNames[0],
-                    subset=', '.join(tInputs_),
-                    other_subset=', '.join(tOutputs_),
-            )
-            loop_body_state.add_nedge(inAN, outAN, memlet)
-
-        else:
-            tInputs  = [ ('__in0',  dace.Memlet.simple(inpArrName, ', '.join(tInputs_)))   ]
-            tOutputs = [ ('__out0', dace.Memlet.simple(outArrName, ', '.join(tOutputs_))) ]
-            loop_body_state.add_mapped_tasklet(
-                name=tName,
-                map_ranges=self._listToDict(tMapRanges),
-                inputs=self._listToDict(tInputs),
-                code=tCode,
-                outputs=self._listToDict(tOutputs),
-                external_edges=True,
-            )
-        #
-
-        return loop_end_state
+        return gather_state 
     # end def: translateEqn
 
 
