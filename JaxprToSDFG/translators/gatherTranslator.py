@@ -66,6 +66,9 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
         """
         assert(len(eqn.invars) == 2)
 
+        # Use the map to perform the copy.
+        use_map = False
+
         outArrName = outVarNames[0]
         outArr     = eqn.outvars[0]                 # This is the array we want to write to
         outShape   = eqn.outvars[0].aval.shape
@@ -147,8 +150,8 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
                 if(dim not in start_index_map):
                     # This dimension is fully copied, by the map.
                     tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
-                    tInputs_.append( tMapRanges[-1][0] )
-                    itSpaceVar.append( tInputs_[-1] )
+                    tInputs_.append( tMapRanges[-1][0] if use_map else tMapRanges[-1][1] )
+                    itSpaceVar.append( tMapRanges[-1][0] )
                     itSpaceCnt += 1
                 elif(dim in collapsed_slice_dims):
                     # It is collapsed so we only have to copy the element that is denoted.
@@ -158,8 +161,9 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
                 else:
                     # The dimension is not collapsed, but there is an offset, it also opens an iteration space
                     tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
-                    tInputs_.append( tMapRanges[-1][0] + " + " + stateVars[dim] )
                     itSpaceVar.append( tMapRanges[-1][0] )
+                    if(use_map):    tInputs_.append( tMapRanges[-1][0] + " + " + stateVars[dim] )
+                    else:           tInputs_.append( f'{stateVars[dim]}:{stateVars[dim] + slice_size}' )
                     itSpaceCnt += 1
                 #
             #
@@ -170,7 +174,8 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
             for dim in range(len(outShape)):
                 if(dim in offset_dims):
                     iDim = offset_dims.index(dim)
-                    tOutputs_.append( itSpaceVar[iDim] )
+                    if(use_map):    tOutputs_.append( itSpaceVar[iDim] )
+                    else:           tOutputs_.append( f'0:{slice_sizes[dim]}' )
                 else:
                     assert len(batch_dims) == 1
                     tOutputs_.append( str(loop_var) )
@@ -180,7 +185,7 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
             tCode = '__out0 = __in0'
             tName = f"_gather_map_{outArrName}_state{loop_var}_"
 
-            if(is_scalar_patch):
+            if(is_scalar_patch or (not use_map)):
                 inAN  = gather_state.add_read(inpArrName)
                 outAN = gather_state.add_write(outArrName)
                 memlet = dace.Memlet(
