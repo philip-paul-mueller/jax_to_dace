@@ -73,6 +73,9 @@ class SlicingTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Does not allow for literals in the input arguments.")
         #
 
+        # Should use a map in the slicing
+        use_map = False
+
         inAVal   = eqn.invars[0].aval            # The abstract value
         inShape  = inAVal.shape                  # The shape of the inpt value.
         outAVal  = eqn.outvars[0].aval
@@ -88,25 +91,44 @@ class SlicingTranslator(JaxIntrinsicTranslatorInterface):
             raise NotImplementedError(f"The case of a non-None Stride in slicing is not implemented.")
         #
 
-        tMapRanges, tOutputs_ = [], []
-        for dim in range(len(outShape)):
-            tMapRanges.append( (f'__i{dim}', f'0:{sStop[dim] - sStart[dim]}') )
-            tOutputs_.append( tMapRanges[-1][0] )
-        #
+        if(use_map):
+            tMapRanges, tOutputs_ = [], []
+            for dim in range(len(outShape)):
+                tMapRanges.append( (f'__i{dim}', f'0:{sStop[dim] - sStart[dim]}') )
+                tOutputs_.append( tMapRanges[-1][0] )
+            #
 
-        tInputs_ = []
-        for (mapItVar, _), startIdx in zip(tMapRanges, sStart):
-            tInputs_.append( f'{mapItVar} + {startIdx}' )
-        #
+            tInputs_ = []
+            for (mapItVar, _), startIdx in zip(tMapRanges, sStart):
+                tInputs_.append( f'{mapItVar} + {startIdx}' )
+            #
 
-        eqnState.add_mapped_tasklet(
-            f'_slicing_{str(eqn.outvars[0])}',
-            map_ranges={k: v  for k, v in tMapRanges},
-            inputs=dict(__in=dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))),
-            code='__out = __in',
-            outputs=dict(__out=dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))),
-            external_edges=True
-        )
+            eqnState.add_mapped_tasklet(
+                f'_slicing_{str(eqn.outvars[0])}',
+                map_ranges={k: v  for k, v in tMapRanges},
+                inputs=dict(__in=dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))),
+                code='__out = __in',
+                outputs=dict(__out=dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))),
+                external_edges=True
+            )
+
+        else:
+            # Use a memlet directly
+            tInputs_, tOutputs_ = [], []
+            for start, stop in zip(sStart, sStop):
+                tInputs_.append( f'{start}:{stop}' )
+                tOutputs_.append( f'0:{stop - start}' )
+            #
+
+            inAN   = eqnState.add_read(inVarNames[0])
+            outAN  = eqnState.add_write(outVarNames[0])
+            memlet = dace.Memlet(
+                        inVarNames[0],
+                        subset=', '.join(tInputs_),
+                        other_subset=', '.join(tOutputs_),
+            )
+            eqnState.add_nedge(inAN, outAN, memlet)
+        #
 
         return eqnState
     # end def: translateEqn
