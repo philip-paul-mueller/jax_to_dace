@@ -12,29 +12,20 @@ from typing import Union, Any
 
 
 class GatherTranslator(JaxIntrinsicTranslatorInterface):
-    """This implements the `select_n` Jax intrinsic which acts as a generalized `where`.
+    """This implements the gather instruction.
 
-    Its general notation is:
-    ```
-        select_n(cond, *cases)
-    ```
-    `cond` is either a boolean (array) in which case `*cases` represents two arrays, and the behaviour is essentially the same `where`.
-    In the second mode `cond` is an integer array, whose elements are bound by `0 <= cond_i < N`, in that case `*cases` represents `N` different arrays, 
-    basically we have `cases[cond_i]`, i.e. indirect indexing.
-
-    As a simplification, the documentation makes it clear that _all_ arrays have the same shape, but scalars are allowed.
-
-    See also:
-        https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.select_n.html#jax.lax.select_n
+    In previous versions this created a state machine.
+    However, in newer version it will create multiple maps, i.e. unroll the loop statically.
 
     Notes:
-        This class is based on an earlier version of the `SimpleTranslator` class.
+        https://www.tensorflow.org/xla/operation_semantics#gather
+        https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.gather.html
     """
     __slots__ = ()
 
 
     def __init__(self):
-        """Initializes a `briadcast_in_dim` translators
+        """Initialize.
         """
         super().__init__()      # As requiered call the initializer of the super class
         pass                    # There is nothing to initialize.
