@@ -128,7 +128,7 @@ class SelectNTranslator(JaxIntrinsicTranslatorInterface):
         #
 
         # This is the name of the tasklet and the name of the 
-        tName = eqn.primitive.name
+        tName = f'_{eqn.primitive.name}__{outVarNames[0]}_'
 
         if(is_scalar):
             # This creates the tasklet, but we have to establish the connections

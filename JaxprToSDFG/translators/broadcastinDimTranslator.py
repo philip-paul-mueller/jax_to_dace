@@ -72,6 +72,7 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             While the implementation could potentially handle a step size not equal than 1, Jax seems to implement that a bit different.
         """
         outShape     = eqn.outvars[0].aval.shape
+        inShape      = eqn.invars[0].aval.shape
         shape        = eqn.params['shape'               ]
         bDims        = eqn.params['broadcast_dimensions']
         inpIsLiteral = False
@@ -120,6 +121,9 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Parameters specified a shape of `{shape}` but the output variable ad a shape of `{eqn.outvars[0].aval.shape}`.")
         if(outShape != shape):
             raise ValueError(f"shape of the output was `{outShape}`, but the specified shape was `{shape}`.")
+        if(not ( len(inShape) < len(outShape))):
+            raise ValueError(f"Starnge input, the output shape, `{outShape}`, has more dimensions that the input, `{inShape}`.")
+        #
 
         if(inpIsLiteral or inpIsScalar):
             # This code is inspired from the `numpy.full` function.
@@ -167,6 +171,9 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
                         other_subset=', '.join(tOutputs_),
             )
             eqnState.add_nedge(inAN, outAN, memlet)
+
+        # TODO: add this specialization that we can also remove the map in this case.
+        #elif(isBDimOrdered and (not sameNbOfElements)):
 
         else:
             # We are using a map to copy the data arround. For thsi we will iterate through the entier output domain
