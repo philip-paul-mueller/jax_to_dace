@@ -1,8 +1,11 @@
 .ipynb_checkpoints/
 .dacecache/
-dace
-jax
 $
 __pycache__/
 _dacegraphs/
 junk/
+
+
+dace
+jax
+gt4py
