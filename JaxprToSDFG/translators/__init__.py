@@ -10,6 +10,7 @@ from .reshapeTranslator                             import ReshapeTranslator
 from .broadcastinDimTranslator                      import BroadcastInDimTranslator
 from .selectNTranslator                             import SelectNTranslator
 from .gatherTranslator                              import GatherTranslator
+from .gatherTranslator2                             import GatherTranslator2
 from .concatenateTranslator                         import ConcatenateTranslator
 from .convertElementTypeTranslator                  import ConvertElementTypeTranslator
 from .devicePutTranslator                           import DevicePutTranslator
@@ -24,7 +25,7 @@ ALL_TRAFOS = [
     ReshapeTranslator,
     BroadcastInDimTranslator,
     SelectNTranslator,
-    GatherTranslator,
+    GatherTranslator2,
     ConcatenateTranslator,
     ConvertElementTypeTranslator,
     DevicePutTranslator,
