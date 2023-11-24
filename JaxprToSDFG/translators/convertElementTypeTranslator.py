@@ -75,7 +75,6 @@ class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
             print(f"The casting of variable {inVarNames[0]} to {outVarNames[0]} is unnecessary, since both are of type {eqn.outvars[0].aval.dtype}", file=stderr)
         #
 
-
         # This code is inspired from the `numpy.full` function.
         inName    = inVarNames[0]
         outName   = outVarNames[0]

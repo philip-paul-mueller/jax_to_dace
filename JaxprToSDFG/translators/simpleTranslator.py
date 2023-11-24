@@ -132,14 +132,19 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
         # if we are scalar or not it is sufficient to check if the output is.
         is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
 
+        # Look if we have inputs as scalars.
+        inpScalars = [len(Inp.aval.shape) == 0  for i, Inp in enumerate(eqn.invars)]
+        hasScalarsAsInputs = any(inpScalars)
+        onlyScalarsAsInputs = all(inpScalars)
+
         if(not (1 <= len(eqn.invars) <= 2)):        # Never remove this ceck the whole code depends on that.
             raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
         if(len(eqn.outvars) != 1):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
         if(outVarNames[0] is None):
             raise ValueError(f"The outut name must be a real variable.")
-        if(not all([len(eqn.outvars[0].aval.shape) == len(eqn.invars[i].aval.shape)  for i in range(len(inVarNames)) if inVarNames[i] is not None])):
-            raise ValueError(f"Found shapes that differs in the number of dimensions: {eqn}.")
+        if(not all([len(eqn.outvars[0].aval.shape) == len(eqn.invars[i].aval.shape)  for i in range(len(inVarNames)) if (inVarNames[i] is not None) and (not inpScalars[i])])):
+            raise ValueError(f"Found shapes that differs in the number of dimensions, outVar `{outVarNames[0]}`.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
         if(len(eqn.effects) != 0):
@@ -148,10 +153,10 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
         # We are now checking if there is broadcasting going on.
         has_some_literals = any([x is None  for x in inVarNames])
-        if((not has_some_literals) and (not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))]))):
+        inpsSameShape     = all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))])
+        if((not has_some_literals) and (not inpsSameShape) and (not hasScalarsAsInputs)):
             # There are shapes that differ, this might indicate broadcasting.
             #  So we have to check in how they are differents
-
             if(len(inVarNames) != 2):
                 raise ValueError(f"Can only do broadcasting if there are two operands.")
             #
@@ -188,7 +193,9 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
             # end for(dim):
 
         else:
-            if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
+            if(hasScalarsAsInputs and (not onlyScalarsAsInputs)):
+                pass
+            elif(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
                 raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvars[0].aval.shape}) have the same shapes.")
             # Since the shapes are the same there is no need for broadcasting, so the two lists are empty.
             dimsToBCastL = []
@@ -210,7 +217,7 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
                 continue
             #
 
-            if(is_scalar):
+            if(is_scalar or (hasScalarsAsInputs and inpScalars[i])):
                 iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
             else:
                 tInputs_ = []
