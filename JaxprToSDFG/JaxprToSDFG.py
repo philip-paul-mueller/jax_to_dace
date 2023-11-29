@@ -101,6 +101,7 @@ class JaxprToSDFG:
                   simplify = False,
                   auto_opt = False,
                   device: DeviceType = DeviceType.CPU,
+                  ret_by_arg = False,
     ) -> dace.SDFG:
         """Transforms `jaxpr` into an `SDFG`.
 
@@ -110,10 +111,18 @@ class JaxprToSDFG:
         If `auto_opt` is an integer, that many times `auto_optimize` will be applied.
 
         Args:
-            jaxpr:      The `ClosedJaxpr` instance that should be translated.
-            simplify:   Apply simplify to the generated `SDFG`.
-            auto_opt:   Appy `auto_optimize` on the `SDFG` before returning it.
-            device:     For which device to optimize for.
+            jaxpr:          The `ClosedJaxpr` instance that should be translated.
+            simplify:       Apply simplify to the generated `SDFG`.
+            auto_opt:       Appy `auto_optimize` on the `SDFG` before returning it.
+            device:         For which device to optimize for.
+            ret_by_arg:     Return the result by arguments, defaults to `False`.
+
+
+        Notes:
+            If `ret_by_arg` is set to `True` then the SDFG will transform the return statement `return A`
+                into an assignement, `_out[:] = A[:]`, where `_out` is a pseudo argument that is added at
+                the end to the argument list. If multiple values are returned then the variables will be
+                named `_out{i}`.
         """
         import dace
         from dace import SDFG
@@ -138,10 +147,11 @@ class JaxprToSDFG:
         else:
             raise TypeError(f"Does not know how to handle `{auto_opt}` ({type(auto_opt)}) passed as `auto_opt`.")
         assert isinstance(auto_opt, int) and (auto_opt >= 0)
+        assert getattr(self, "m_sdfg", None) is None
 
         try:
-            jaxSDFG: SDFG = self._transform(jaxpr)   # Perform the translation.
-            
+            jaxSDFG: SDFG = self._transform(jaxpr=jaxpr, ret_by_arg=ret_by_arg)   # Perform the translation.
+
             if(simplify):
                 jaxSDFG.simplify()
             for _ in range(auto_opt):
@@ -261,8 +271,12 @@ class JaxprToSDFG:
             raise ValueError(f"Expected that the argument list of the SDFG is empty but it already contains: {self.m_sdfg.arg_names}")
         #
 
+        # This ensures that the `sdfg.arg_names` member of the SDFG is a member variable and not a class variable.
+        #  This is for working around a bug DACE, and it seems that GT4Py depend on that bug.
+        #  See: https://github.com/spcl/dace/pull/1457
+        #self.m_sdfg.arg_names = []
+
         # We have to iterate through the non closed jaxpr, because there the names are removed.
-        self.m_sdfg.arg_names = []
         for inp in jaxpr.jaxpr.invars:
             name = self._addArray(inp, isTransient=False)
             self.m_sdfg.arg_names.append(name)
@@ -272,22 +286,42 @@ class JaxprToSDFG:
     # end def: _createInitialInputs
 
 
-    def _createReturnOutput(self, jaxpr: ClosedJaxpr):
+    def _createReturnOutput(self,
+                            jaxpr: ClosedJaxpr,
+                            ret_by_arg: bool
+    ):
         """Creates the return value statement.
+
+        Args:
+            jaxpr:          The `ClosedJaxpr` for which the return statements should be created.
+            ret_by_arg:     Create a pseudoargument to return the value instead, see `self.transform()` for more.
         """
+        nbOutVars: int = len(jaxpr.jaxpr.outvars)
+        if(nbOutVars == 0):
+            raise ValueError(f"Passed zero putput variables.")
+        #
+
+        # Determine the name of the return value.
+        if(ret_by_arg):
+            if(nbOutVars):  retValNameTempl: str = '_out'            # Pseudoargument in which the value is returned.
+            else:           retValNameTempl: str = '_out{}'
+        else:
+            if(nbOutVars):  retValNameTempl: str = '__return'        # Special SDFG name.
+            else:           retValNameTempl: str = '__return_{}'
+        #
 
         # Create now the arrays that we use as output, these are the special `__return` / `__return_{IDX}` variables.
         outVarMap: dict[str, str] = {}
-        for i in range(len(jaxpr.jaxpr.outvars)):
-            jaxOutVar  = jaxpr.jaxpr.outvars[i]                                                         # Name of the variable inside jax/SDFG
-            SDFGoutVar = ('__return' if len(jaxpr.jaxpr.outvars) == 1 else '__return_{}').format(i)     # This name will mark it as a return value.
+        sdfgOutVarOrder: list[str] = []
+        for i in range(nbOutVars):
+            jaxOutVar  = jaxpr.jaxpr.outvars[i]         # Name of the variable inside jax/SDFG
+            SDFGoutVar = retValNameTempl.format(i)      # This name will mark it as a return value.
 
             # Create an output array that has the same shape as `jaxOutVar` but with name `SDFGoutVar`.
             #  We have to force the creation of a container (otherwhise the code generator will safe the result in a pass by value argument).
             _ = self._addArray(jaxOutVar, isTransient=False, altName=SDFGoutVar, forceArray=True)
-
-            assert _ == SDFGoutVar
             outVarMap[str(jaxOutVar)] = SDFGoutVar
+            sdfgOutVarOrder.append(SDFGoutVar)
         # end for(i):
 
         # Now we create the return state.
@@ -299,6 +333,14 @@ class JaxprToSDFG:
             memlet = dace.Memlet.from_array(sVar, self.getArray(jVar))
             final_state.add_edge(jAN, None, sAN, None, memlet)                      # Now we add  the connection between them
         #
+
+        # If needed add the pseudo arguments to the argument list
+        if(ret_by_arg):
+            assert len(self.m_sdfg.arg_names) > 0
+            for sVar in sdfgOutVarOrder:
+                self.m_sdfg.arg_names.append(sVar)
+        #
+
         return
     # end def: _createReturnOutput
 
@@ -352,11 +394,15 @@ class JaxprToSDFG:
     #   Internal Translation Routines
     #
 
-    def _transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """This function does the actuall transformation, but it does not reset the internal state.
+    def _transform(self,
+                   jaxpr: ClosedJaxpr,
+                   ret_by_arg: bool,
+        ) -> dace.SDFG:
+        """This function does the actuall transformation.
 
         You should not use this function directly, instead you should always call `self.transform()`.
         The reason is that `self.transform()` prepares the internal state of `self`.
+        Also look there for more information about the arguments.
         """
         if self.m_sdfg is not None:
             raise RuntimeError("Expected the that `self` is in an initial state, but it does not seem to be the case.")
@@ -397,7 +443,7 @@ class JaxprToSDFG:
         # end for(eqn): transforming
 
         # Handle the output stuff
-        self._createReturnOutput(jaxpr)
+        self._createReturnOutput(jaxpr, ret_by_arg=ret_by_arg)
 
         return self.m_sdfg
     # end def: _transform
