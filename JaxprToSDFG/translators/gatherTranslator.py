@@ -75,10 +75,6 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
         idxArr     = eqn.invars[1]
         idxShape   = idxArr.aval.shape
 
-        if(len(idxShape) != 2):
-            raise NotImplementedError(f"Currently more than this is not supported.")
-        #
-
         dimension_numbers            = eqn.params['dimension_numbers']
         offset_dims: tuple[int, ...] = dimension_numbers.offset_dims
         collapsed_slice_dims         = dimension_numbers.collapsed_slice_dims
@@ -94,27 +90,27 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
         # Over this the copy loop goes
         batch_dims = tuple([d  for d in range(len(outShape)) if d not in offset_dims])
 
-        # We assume this since it makes things a bit simpler.
-        #  Every additional dimension would add one new iteration index.
-        if(len(batch_dims) != 1):
-            raise NotImplementedError(f"The process is only implemented for the case of one batch dimensions, but you have `{len(batch_dims)}` ({batch_dims})")
+        # Every batch dimenion is associated with one dimenions of of the index array, but there is always one dimension more in the index array.
+        #  This dimension contains the start indexes of the slice.
+        if((len(batch_dims) + 1) != len(idxShape)):
+            raise ValueError(f"There is a problem expected that the index array has a dimenision of {len(batch_dims) + 1}, but it had {len(idxShape)}")
         #
 
-        # We will gather implement as a copy, that we implement as a tasklet.
+        # These are the dimensions (of the input) for which a mpa index is created.
+        inpDimWithMapIdx = tuple([dim  for dim in range(len(slice_sizes)) if dim not in collapsed_slice_dims])
+        assert len(inpDimWithMapIdx) == len(offset_dims)
+
+        # We will gather implement as a copy tasklet.
         #  The reason for this is that the tasklet has to do its onw access to the array, sicne the index we have to access is inside `idxArr`.
-        #  Since we (currently) assume one batch dimensions we have one additional iteration index to the map index we need for copying the slice.
-        #  However, this restriction could be lifted.
-        nbStateIter = idxShape[0]                       # How many slices we produce.
-        loop_var    = f'__i{outArrName}__gather'        # Variable name that is used to iterate through the domain.
-        if(nbStateIter <= 0):
-            raise ValueError(f"In translation of `{str(eqn)}` have to perform the invalid number of `{nbStateIter}` state iterations.")
-        #
+        #  Every batch dimension has its own loop variable
+        nbStateIters = idxShape[:-1]
+        loopVars     = tuple([f'__i{outArrName}_gather{bd}'  for bd in batch_dims])
 
         idxArrySub = []         # Array to store how the access in the tasklet has to be performed.
         itSpaceVar = {}         # Stores the slice iteration variables used in each dimension.
 
         # Now we get the map ranges
-        #  Currently we will only collect the ones associated to the slices and not the one used for the batch dimensions.
+        #  Currently we will only collect the ones associated to the slices and ignore the batch domensions.
         tMapRanges = []
         for dim, slice_size in enumerate(slice_sizes):
             if(dim not in start_index_map):
@@ -122,18 +118,20 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
                 tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
                 itSpaceVar[dim] = tMapRanges[-1][0]
                 idxArrySub.append( tMapRanges[-1][0] )          #there is nthing we have to read from the index array.
+                assert dim in inpDimWithMapIdx
 
             elif(dim in collapsed_slice_dims):
-                # This dimension is only partially copied, thus there is map index and an offset (from the index variable)
-                #  that is accessing it, but since the dimension is collapsed, only the offset is used and no map index is created.
+                # This dimension is only partially copied, however, since the dimension is collapsed, only a single
+                #  entry is copied that comes from the index array.
                 idxArrySub.append( f'__gather_{dim}' )
 
             else:
-                # This dimension is partially copied, but since it is not colapsed, accessing it involves an
-                #  offset from teh index array and the map iteration.
+                # This dimension is partially copied, but since it is not colapsed, we need a map idex to copy the range.
+                #  However, there is also an offset that is involved from copying.
                 tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
                 idxArrySub.append( f'__gather_{dim} + {tMapRanges[-1][0]}' )
                 itSpaceVar[dim] = tMapRanges[-1][0]
+                assert dim in inpDimWithMapIdx
             #
             assert len(slice_sizes) == len(inpShape)
         #
@@ -154,7 +152,7 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
         # Now we are creating the memlts to access the index array and make them aviable inside the tasklet.
         for i, dim in enumerate(start_index_map):
             q = f'__gather_{dim}'                                   # Name of the index variable inside the tasklet.
-            m = dace.Memlet.simple(idxArrName, f'{loop_var}, {i}')  # Geting it from `idxArr[loop_var, i]`.
+            m = dace.Memlet.simple(idxArrName, f', '.join(loopVars) + f', {i}')  # Geting it from `idxArr[loop_var..., i]`.
             tInputs.append( (q, m) )
         #
 
@@ -163,17 +161,29 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
 
         # Now the output variables.
         tOutputs_ = []
+        mapIdxCnt = 0
         for dim in range(len(outShape)):
-            if(dim in offset_dims):
-                tOutputs_.append( itSpaceVar[dim] )
+            if(dim in batch_dims):
+                # This is a batch dimension, thus a loop variable is used for it.
+                loopVar = loopVars[ batch_dims.index(dim) ]
+                tOutputs_.append( str(loopVar) )
+
             else:
-                assert len(batch_dims) == 1
-                tOutputs_.append( str(loop_var) )
+                # This is an offeset dimension, this means that for this dimension a map index is requiered.
+                assert mapIdxCnt <= len(inpDimWithMapIdx)
+                currMapDim = inpDimWithMapIdx[mapIdxCnt]
+                mapIdxCnt += 1
+                tOutputs_.append( itSpaceVar[currMapDim] )
+            #
         #
+        assert mapIdxCnt == len(inpDimWithMapIdx)
         tOutputs = [ ('__out', dace.Memlet.simple(outArrName, ', '.join(tOutputs_))) ]
 
         # Now we have to insert the batch index or state variable.
-        tMapRanges.insert(0, (loop_var, f'0:{nbStateIter}') )
+        tMapRanges = (
+                [ (loopVars[i], f'0:{nbStateIters[i]}')  for i in range(len(batch_dims)) ]
+                + tMapRanges
+        )
 
         eqnState.add_mapped_tasklet(
             name=f"_gather_map_{outArrName}",
