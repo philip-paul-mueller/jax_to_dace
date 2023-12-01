@@ -76,20 +76,34 @@ class ReductionTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Dace seems to have an issue with flattened arrays for _argminmax")
         #
 
+        # Some information about the variables we are working with.
+        inAVal   = eqn.invars[0].aval
+        inShape  = inAVal.shape
+        outAVal  = eqn.outvars[0].aval
+        outShape = outAVal.shape
+
+        # Along these axis we have to reduce.
+        red_axes = eqn.params["axes"]
+
         redfunction = None
+        redOps = None
         identity = None
         if eqn.primitive.name == "reduce_min":
             redfunction = "lambda x, y: min(x, y)"
             identity = dtypes.max_value(translator.getArray(inVarNames[0]).dtype)
+            redOps = 'min({}, {})'
         elif eqn.primitive.name == "reduce_max":
             redfunction = "lambda x, y: max(x, y)"
             identity = dtypes.min_value(translator.getArray(inVarNames[0]).dtype)
+            redOps = 'max({}, {})'
         elif eqn.primitive.name == "reduce_sum":
             redfunction = "lambda x, y: x + y"
             identity = 0.
+            redOps = '(({}) + ({}))'
         elif eqn.primitive.name == "reduce_prod":
             redfunction = "lambda x, y: x * y"
             identity = 1.
+            redOps = '(({}) * ({}))'
         elif eqn.primitive.name == "argmin":
             redfunction = "min"
         elif eqn.primitive.name == "argmax":
@@ -98,7 +112,64 @@ class ReductionTranslator(JaxIntrinsicTranslatorInterface):
         if not redfunction:
             raise NotImplementedError(f"This reduction primitive [{eqn.primitive.name}] is not implemented")
 
-        if identity != None:
+        if((redOps is not None) and (len(red_axes) == 1) and (len(inShape) > 1)):
+            # Specialization we perform reduction along one axis and there are more than one axis remains.
+            #  This is basically that we "sum" along one axis.
+            assert len(outShape) > 0
+            assert len(red_axes) == 1
+            assert inShape[red_axes[0]] > 1
+            red_axe = red_axes[0]    # Since we have only one element.
+
+            tMapRanges, tOutputs_, tInputs_ = [], [], []
+            for dim, size in enumerate(inShape):
+                if(dim == red_axe):
+                    tInputs_.append( None )
+                else:
+                    tMapRanges.append( (f'__i{dim}', f'0:{size}') )
+                    tOutputs_.append( tMapRanges[-1][0] )
+                    tInputs_.append( tMapRanges[-1][0] )
+            #
+
+            # Now we build the output memlet.
+            tOutputs = dict(__out=dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_)))
+
+            # Now we build the input memlets, we need one for every element in that dimension.
+            tInputs = dict()
+            tInpArgs = []
+            assert tInputs_[red_axe] is None
+            assert sum([1 if x is None else 0  for x in tInputs_]) == 1
+            for i in range(inShape[red_axe]):
+                tInpArgs.append(f'__in{i}')
+                tInputs_[red_axe] = str(i)
+                tInputs[tInpArgs[-1]] = dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))
+            #
+            tInputs_[red_axe] = None
+
+            # Now we must write the tasklet which we will also use correct paranthesis.
+            while len(tInpArgs) != 1:
+                tRedInpArgs = []
+                while len(tInpArgs) >= 2:
+                    arg1 = tInpArgs.pop()
+                    arg2 = tInpArgs.pop()
+                    redArg = redOps.format(arg1, arg2)
+                    tRedInpArgs.append(redArg)
+                if(len(tInpArgs) == 1):
+                    tRedInpArgs.append(tInpArgs.pop())
+                assert len(tInpArgs) == 0
+                tInpArgs = tRedInpArgs ; del tRedInpArgs
+            #
+            tCode = f'__out = {tInpArgs[0]}'
+
+            eqnState.add_mapped_tasklet(
+                f'_reduction_{outVarNames[0]}',
+                map_ranges=tMapRanges,
+                inputs=tInputs,
+                code=tCode,
+                outputs=tOutputs,
+                external_edges=True
+            )
+
+        elif identity is not None:
             _reduce(None,
                     translator.getSDFG(),
                     eqnState,
