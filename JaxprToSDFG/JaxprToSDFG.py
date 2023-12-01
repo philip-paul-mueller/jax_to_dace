@@ -159,11 +159,13 @@ class JaxprToSDFG:
             #
             jaxSDFG.validate()      # This function throws if an error is detected.
 
-            return jaxSDFG
+        except:
+            raise
 
-        finally:
+        else:
             self._clearState()
-        #
+
+        return jaxSDFG
     # end def: transform
 
 
@@ -219,13 +221,13 @@ class JaxprToSDFG:
 
         argName = str(arg) if altName is None else str(altName)     # Ensure that we have a string.
         if argName in self.m_sdfg.arrays:
-            raise ValueError(f"The variable `{str(arg)}` is already recorded in the SDFG.")
+            raise ValueError(f"The variable `{str(argName)}` is already recorded in the SDFG.")
         if(len(argName) == 0):
             raise ValueError(f"Got an empty name.")
         elif(argName[0].isdigit()):
-            raise ValueError(f"Requested to create the array '{arg}', is ilegal since it starts with a digit.")
+            raise ValueError(f"Requested to create the array '{argName}', is ilegal since it starts with a digit.")
         elif(any([x.isspace()  for x in argName])):
-            raise ValueError(f"The name of the array, '{arg}', to create contained a space!")
+            raise ValueError(f"The name of the array, '{argName}', to create contained a space!")
         #
 
         name      = argName
@@ -297,17 +299,18 @@ class JaxprToSDFG:
             ret_by_arg:     Create a pseudoargument to return the value instead, see `self.transform()` for more.
         """
         nbOutVars: int = len(jaxpr.jaxpr.outvars)
+        retTuple: bool = nbOutVars > 1
         if(nbOutVars == 0):
             raise ValueError(f"Passed zero putput variables.")
         #
 
         # Determine the name of the return value.
         if(ret_by_arg):
-            if(nbOutVars):  retValNameTempl: str = '_out'            # Pseudoargument in which the value is returned.
-            else:           retValNameTempl: str = '_out{}'
+            if(retTuple):   retValNameTempl: str = '_out{}'
+            else:           retValNameTempl: str = '_out'            # Pseudoargument in which the value is returned.
         else:
-            if(nbOutVars):  retValNameTempl: str = '__return'        # Special SDFG name.
-            else:           retValNameTempl: str = '__return_{}'
+            if(retTuple):   retValNameTempl: str = '__return_{}'
+            else:           retValNameTempl: str = '__return'        # Special SDFG name.
         #
 
         # Create now the arrays that we use as output, these are the special `__return` / `__return_{IDX}` variables.
