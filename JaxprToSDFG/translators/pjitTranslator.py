@@ -12,7 +12,9 @@ from typing import Union, Any
 class PJITTranslator(JaxIntrinsicTranslatorInterface):
     """`pjit` is essentially distributed stuff.
 
-    Currently we ignore it, so this translator just generates an error and tells the user how to avoid it.
+    It allows to perform an operation in a distributed stuff.
+    Currently we ignore it and generate an error if this primitive is found.
+    It will then output how the translation can be done without generating this primitive.
     """
     __slots__ = ()
 

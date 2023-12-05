@@ -1,4 +1,7 @@
 """This subpackage contains all concrete transformsations 
+
+If you write a new translator, import it here and add it to the `ALL_TRAFOS`.
+It will then automatically created by an `JaxprToSDFG` instance.
 """
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslatorInterface

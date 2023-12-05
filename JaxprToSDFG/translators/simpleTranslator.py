@@ -1,4 +1,6 @@
 """This module contains the simple transformator.
+
+Essentailly it handles binary and unary arethmetical operations and mathematical functions.
 """
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
@@ -15,15 +17,13 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
     Current restrictions of the translator:
     - either 1 or 2 input values.
     - exactly one output value.
-    - all non-literal operants (output and all inputs) must habe the same shape.
     - in the array case, i.e. output is an array, at least most one input can be a literal
     - in the scalar case all arguments can be litterals.
+    - broadcasting _should_ be fully supported by now.
+    - Reduction operatiors, such as `numpy.amin()` are not supported.
 
-    Examples for simple operations are:
-    - Arethmetic operations.
-    - Mathematical Functions.
-
-    However, `reducing` operations are not included, such as `numpy.amin`.
+    Todo:
+        Split this class into a binary and unarry part.
     """
     __slots__ = ("m_unarryOps", "m_binarryOps")
 

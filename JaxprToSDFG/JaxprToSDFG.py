@@ -27,9 +27,14 @@ class JaxprToSDFG:
     Notes:
         Equations that only have `_` as output variables are ignored.
             It seems that `grad` inserts them.
+        If you start reading the code start at the `transform()` function.
+        The class only has a (allocated) members during the transformatiosn, otherwhise they are `None`.
+        If a translation failes the internal state is not deallocated, before you can use the object again,
+            you have to call `_clearState()` manually.
 
     Todo:
         Fully dynamic storage sizes or just the strides(?), i.e. make them symbols such that DaCe can play more.
+        Implement a JIT semantic.
     """
 
 
@@ -80,6 +85,9 @@ class JaxprToSDFG:
         if(self.m_eqnTranslators is not None):
             raise ValueError(f"The translators are already initialized.")
         self.m_eqnTranslators = []
+
+        # Add self to kwargs, such that classes can access it.
+        #kwargs['_driver'] = self
 
         for cls in ALL_TRAFOS:
             self.m_eqnTranslators.append( cls(*args, **kwargs) )

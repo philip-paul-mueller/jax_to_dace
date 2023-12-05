@@ -22,6 +22,8 @@ from dace.frontend.python.nested_call import NestedCall
 
 class ReductionTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles reduction operations
+
+    It forwards the call to dace.
     """
     __slots__ = ("m_primitives", )
 

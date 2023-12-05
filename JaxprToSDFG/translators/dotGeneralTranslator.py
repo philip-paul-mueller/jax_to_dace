@@ -8,7 +8,12 @@ from typing import Union
 
 
 class DotGeneralTranslator(JaxIntrinsicTranslatorInterface):
-    """This class handles dot_general
+    """This class handles dot_general primitive.
+
+    It will insert a library node.
+
+    Todo:
+        Do not call the frontend functions but copy them into this repo.
     """
     __slots__ = ()
 

@@ -11,6 +11,11 @@ class JaxIntrinsicTranslatorInterface:
 
     An intrinsic translator basically handles the translation of a single equation to its equivalent SDFG construct.
     There might be many different translators depending on what equation is currently processed.
+
+    An instance must have the following properties:
+    - It must be stateless.
+    - It must be possible to construct it without any arguments.
+    - It must be derived from `JaxIntrinsicTranslatorInterface`.
     """
 
     def __init__(self, *args, **kwargs):

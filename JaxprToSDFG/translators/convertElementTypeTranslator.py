@@ -15,7 +15,6 @@ class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
     """This class acts as a type caster.
 
     Due to the nature of SDFG and Jax this function essentially just copies the data around.
-    The actuall translation should be handled by SDFG.
     Furthermore this function ignores the `weak_type` flag.
     """
     __slots__ = ()

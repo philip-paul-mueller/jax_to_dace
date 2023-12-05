@@ -8,9 +8,10 @@ from typing import Union
 
 
 class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
-    """This class handles the squeezing of an array, which is the removal of an dimension with length 1.
+    """Allows to remove dimensions with size one.
 
-    It is equivalent to the `np.squeeze` function.
+    Essentially equivalent to `np.squeeze`.
+    There are two different modes that are supported, either using a memlet (the default) or using a copy map.
     """
     __slots__ = ()
 
@@ -55,6 +56,8 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
             Jax only allows that the slicing parameters have static values.
             While the implementation could potentially handle a step size not equal than 1, Jax seems to implement that a bit different.
         """
+        use_map = False
+
         if(len(eqn.invars) != 1):
             raise ValueError(f"Squeezing only supports one input argument.")
         if(len(eqn.outvars) != 1):
@@ -69,8 +72,6 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
         inShape = inAVal.shape                  # The shape of the inpt value.
         outAVal = eqn.outvars[0].aval
         outShape = outAVal.shape
-
-        use_map = False
 
         # These are the dimensions to remove.
         dims_to_remove = eqn.params['dimensions']

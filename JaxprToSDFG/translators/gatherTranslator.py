@@ -12,12 +12,21 @@ from typing import Union, Any
 
 
 class GatherTranslator(JaxIntrinsicTranslatorInterface):
-    """This implements A second version of the gather instruction.
+    """Garther primitive.
 
-    Instead of generating a map for every loop iteration it will create a map for the loop index.
-    However, since we have to read symbols, we are forced to use a nested SDFG.
+    There is a good picture [here](https://www.tensorflow.org/xla/operation_semantics#gather) for the 1D case.
+    Essentially, this function copies slices from one array to another array.
+    Where these slices start is specified by an index array.
+    For example it is used to implement advanc indexing.
 
-    Notes:
+    This is the result of several refinement steps and it should work quite well actually.
+    The only problem is that it has to perform the accessing of the index on its own.
+    However, I have not yet found a way to overcome that, I have the feeling that someing in DaCe is missing.
+
+    Todo:
+        Improve the indirection.
+
+    See also:
         https://www.tensorflow.org/xla/operation_semantics#gather
         https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.gather.html
     """

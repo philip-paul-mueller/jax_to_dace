@@ -21,8 +21,12 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
         To which dimension in the target shape each dimension of the operand shape corresponds to.
         That is, dimension i of the operand becomes dimension broadcast_dimensions[i] of the result.
 
+    The class is able to broadcast arrays, esentially replicate them several times inside the target array.
+    Furthermore the class is also able to handle literals.
+
     Notes:
         It seams that Jax maps slicing with a non one step size to a combination of the `broadcast_in_dim` and `gather`.
+            But it seams that the slicing primitives would support a step size.
     """
     __slots__ = ()
 

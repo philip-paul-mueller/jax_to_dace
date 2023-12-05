@@ -9,7 +9,9 @@ from typing import Union, Tuple
 
 
 class ReshapeTranslator(JaxIntrinsicTranslatorInterface):
-    """This class handles reshape operations
+    """This class handles reshape operations.
+
+    It mainly works with Memlet.
     """
     __slots__ = ()
 

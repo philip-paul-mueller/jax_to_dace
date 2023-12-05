@@ -10,11 +10,13 @@ from typing import Union
 class SlicingTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles slicing, it does this by copying the array.
 
-    To be specifical it handles the `slice` intrinsic, which is slicing with a step size of 1.
-    If the stepsize is not one it seems to be reduced to a combination of `broadcast_in_dim` and `gather`.
+    Essentially it copies a "window" which is essentailly a consecutive subset of the input array into the output.
+    The window has the same size as the output array.
 
-    Todo:
-        Implement the copy as a view.
+    Notes:
+        Although the primitive would support a stepsize, i.e. `::n`, but does not use it.
+            Instead it will translate it to slicing and then a gather.
+            For that reason this code does not support a step size (which is called stride here).
     """
     __slots__ = ()
 

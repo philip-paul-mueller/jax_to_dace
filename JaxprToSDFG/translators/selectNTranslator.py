@@ -28,6 +28,8 @@ class SelectNTranslator(JaxIntrinsicTranslatorInterface):
 
     Notes:
         This class is based on an earlier version of the `SimpleTranslator` class.
+        If `cond` is boolean, then `False` is interpreted as `0` and `True` as `1`.
+            This means that the source arrays in this case have an inversed order compared to the classical `where` semantic.
     """
     __slots__ = ()
 
