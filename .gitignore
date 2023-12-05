@@ -1,10 +1,14 @@
-.ipynb_checkpoints/
+# Dace related stuff
 .dacecache/
-$
-__pycache__/
 _dacegraphs/
-junk/
 
+# Python related stuff
+.ipynb_checkpoints/
+__pycache__/
+
+$
+junk/
+.vscode/
 
 dace
 jax
