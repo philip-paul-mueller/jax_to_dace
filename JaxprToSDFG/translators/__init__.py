@@ -5,7 +5,7 @@ It will then automatically created by an `JaxprToSDFG` instance.
 """
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslatorInterface
-from .simpleTranslator                              import SimpleTranslator
+from .ALUTranslator                                 import ALUTranslator
 from .slicingTranslator                             import SlicingTranslator
 from .dotGeneralTranslator                          import DotGeneralTranslator
 from .reductionTranslator                           import ReductionTranslator
@@ -20,7 +20,7 @@ from .pjitTranslator                                import PJITTranslator
 from .squeezeTranslator                             import SqueezeTranslator
 
 ALL_TRAFOS = [
-    SimpleTranslator,
+    ALUTranslator,
     SlicingTranslator,
     DotGeneralTranslator,
     ReductionTranslator,

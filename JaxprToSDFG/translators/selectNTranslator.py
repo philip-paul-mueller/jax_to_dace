@@ -27,7 +27,7 @@ class SelectNTranslator(JaxIntrinsicTranslatorInterface):
         https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.select_n.html#jax.lax.select_n
 
     Notes:
-        This class is based on an earlier version of the `SimpleTranslator` class.
+        This class is based on an earlier version of the `ALUTranslator` class.
         If `cond` is boolean, then `False` is interpreted as `0` and `True` as `1`.
             This means that the source arrays in this case have an inversed order compared to the classical `where` semantic.
     """

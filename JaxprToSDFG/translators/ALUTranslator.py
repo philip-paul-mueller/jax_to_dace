@@ -11,7 +11,7 @@ import numpy as np
 from typing import Union, Any
 
 
-class SimpleTranslator(JaxIntrinsicTranslatorInterface):
+class ALUTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles all the simple cases where only one tasklet is used.
 
     Current restrictions of the translator:
@@ -324,7 +324,7 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
         return tCode
     # end def: _writeTaskletCode
-# end class(SimpleTranslator):
+# end class(ALUTranslator):
 
 
 
