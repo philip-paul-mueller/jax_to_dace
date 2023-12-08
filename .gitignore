@@ -14,3 +14,5 @@ dace
 jax
 gt4py
 pyhpc
+
+*.pickle
