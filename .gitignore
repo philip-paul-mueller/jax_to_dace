@@ -10,9 +10,13 @@ $
 junk/
 .vscode/
 
+# Symlinks
 dace
 jax
 gt4py
 pyhpc
 
+# Stuff related with benchmarking
 *.pickle
+Philip__ICON_velocity_advection_stencil_20.py
+Equation_of_state.py
