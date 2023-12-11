@@ -471,7 +471,6 @@ class JaxprToSDFG:
         This function will also modify the current head.
         """
         assert isinstance(eqn, jax._src.core.JaxprEqn)
-        assert len(eqn.invars)  >  0, "Expected to find at least one input variable."
         assert len(eqn.outvars) >= 1, f"Expected to find at least one output variable for equation '{str(eqn)}' but it had {len(eqn.outvars)}"
         assert all([str(out) not in self.m_jaxNameMap  for out in eqn.outvars]), f"The outputs {[str(out)  for out in eqn.outvars if str(out) in self.m_jaxNameMap]} were already created."
         assert len(eqn.effects) == 0, "This class can only handle siode efect free equations."

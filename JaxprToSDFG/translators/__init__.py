@@ -18,6 +18,7 @@ from .convertElementTypeTranslator                  import ConvertElementTypeTra
 from .devicePutTranslator                           import DevicePutTranslator
 from .pjitTranslator                                import PJITTranslator
 from .squeezeTranslator                             import SqueezeTranslator
+from .iotaTranslator                                import IotaTranslator
 
 ALL_TRAFOS = [
     ALUTranslator,
@@ -33,5 +34,6 @@ ALL_TRAFOS = [
     DevicePutTranslator,
     PJITTranslator,
     SqueezeTranslator,
+    IotaTranslator,
 ]
 
