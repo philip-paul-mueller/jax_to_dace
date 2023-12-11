@@ -42,14 +42,22 @@ class JaxprToSDFG:
     #       Initialization
     #
 
-    def __init__(self):
-        """`self` is stateless so no constructor is needed.
+    def __init__(
+            self,
+            device: DeviceType = DeviceType.CPU
+    ):
+        """`self` is generally stateless, but maintains some variables during translation.
 
+        In addition there are some default values, that are permanently stored inside `self` and set through the constructor.
         The transformsers are set up in `_initEqnTranslators()`.
 
+        Args:
+            device:     The default device for which we should generate, defaults to `CPU`.
         """
         # We now allocate the variables of the internal state (by calling the clear function)
         self._clearState()
+
+        self.m_def_device = device
     #
 
 
@@ -68,6 +76,10 @@ class JaxprToSDFG:
         """Contains all translators for JAX equations
         """
         self.m_eqnTranslators: Optional[list[JaxIntrinsicTranslatorInterface]] = None
+
+        """Device that we traget.
+        """
+        self.m_device = None
 
 
         """This is the variable map, that maps the jax name to the name that is used inside the SDFG.
@@ -108,7 +120,7 @@ class JaxprToSDFG:
                   jaxpr,
                   simplify = False,
                   auto_opt = False,
-                  device: DeviceType = DeviceType.CPU,
+                  device: Optional[DeviceType] = None,
                   ret_by_arg = False,
     ) -> dace.SDFG:
         """Transforms `jaxpr` into an `SDFG`.
@@ -122,7 +134,7 @@ class JaxprToSDFG:
             jaxpr:          The `ClosedJaxpr` instance that should be translated.
             simplify:       Apply simplify to the generated `SDFG`.
             auto_opt:       Appy `auto_optimize` on the `SDFG` before returning it.
-            device:         For which device to optimize for.
+            device:         For which device to optimize for, if `None` the default one is used.
             ret_by_arg:     Return the result by arguments, defaults to `False`.
 
 
@@ -158,12 +170,14 @@ class JaxprToSDFG:
         assert getattr(self, "m_sdfg", None) is None
 
         try:
+            self.m_device = self.m_def_device if device is None else device
+
             jaxSDFG: SDFG = self._transform(jaxpr=jaxpr, ret_by_arg=ret_by_arg)   # Perform the translation.
 
             if(simplify):
                 jaxSDFG.simplify()
             for _ in range(auto_opt):
-                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=device)
+                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=self.m_device)
             #
             jaxSDFG.validate()      # This function throws if an error is detected.
 
@@ -250,12 +264,23 @@ class JaxprToSDFG:
             is_scalar = False
         #
 
+        if(self.m_device is dace.DeviceType.CPU):
+            storage = dace.StorageType.Default
+        elif(self.m_device is dace.DeviceType.GPU):
+            storage = dace.StorageType.GPU_Global
+        else:
+            raise ValueError(f"can not translate the device type `{self.m_device}` to a storage type.")
+        #
+
         if(is_scalar):
-            self.m_sdfg.add_scalar(name=name, dtype=dtype, transient=isTransient)
+            self.m_sdfg.add_scalar(name=name,
+                                   storage=storage, dtype=dtype, transient=isTransient
+            )
         else:
             self.m_sdfg.add_array(
-                    name=name, shape=shape, strides=strides,
-                    offset=offset, dtype=dtype, transient=isTransient
+                    name=name,
+                    shape=shape, strides=strides, offset=offset,
+                    storage=storage, dtype=dtype, transient=isTransient
             )
         #
         assert name in self.m_sdfg.arrays
