@@ -6,6 +6,9 @@ _dacegraphs/
 .ipynb_checkpoints/
 __pycache__/
 
+*.json
+*.sdfg
+
 $
 junk/
 .vscode/
