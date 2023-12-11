@@ -174,6 +174,9 @@ class JaxprToSDFG:
 
             jaxSDFG: SDFG = self._transform(jaxpr=jaxpr, ret_by_arg=ret_by_arg)   # Perform the translation.
 
+            if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
+                jaxSDFG.apply_gpu_transformations()
+
             if(simplify):
                 jaxSDFG.simplify()
             for _ in range(auto_opt):
