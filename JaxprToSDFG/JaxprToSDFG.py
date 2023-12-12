@@ -207,10 +207,17 @@ class JaxprToSDFG:
     #   Variable Management
     #
 
-    def _addArray(self, arg, isTransient=True, altName=None, forceArray = False):
+    def _addArray(
+            self,
+            arg,
+            isTransient: bool = True,
+            altName: Optional[str] = None,
+            forceArray: Optional[bool] = None,
+            forceStorageType: Optional[dace.StorageType] = None,
+    ) -> str:
         """Creates an array inside Dace for `arg` and return its name.
 
-        Note that this function, by defaults creates transients, which is different from `SDFG.add_array()`.
+        Note that this function, by defaults creates transients, which is different from `SDFG.add_array()`, that generates non transients by default.
         The function also distinguishes between `Scalar`s (having empty shapes) and `Array`s (non-empty shape)
         and calls `SDFG.add_scalar()` or `SDFG.add_array()` respectively.
         However, by setting `forceArray` to `True` the function will turn a `Scalar` into a one element `Array`.
@@ -218,13 +225,19 @@ class JaxprToSDFG:
         The name of the entity that is created is usually `str(arg)`, however, the function will enforce some restrictions on that.
         However, these restrictions are not applied to names passed through `altName`.
 
+        Which storage location is used depends on the device.
+        For CPU `dace.StorageType.CPU` and for GPU `dace.StorageType.GPU` is used.
+        However, you by specifing `forceStorageType` you can force a particular type.
+
         Returns:
             The name of the array inside `self.m_sdfg`.
 
         Args:
-            arg:            The Jax object that should be maped to dace.
-            isTransient:    If a transent should be created, by default.
-            forceArray:     Turn scalar in one element arrays.
+            arg:                The Jax object that should be maped to dace.
+            isTransient:        If a transent should be created, by default.
+            altName:            Use an alternative name.
+            forceArray:         Turn scalar in one element arrays.
+            forceStorageType:   Use this particular storage location.
 
         Notes:
             This function does not update the internal variable map, thus you should not use it, except you know what you are doing.
@@ -267,7 +280,9 @@ class JaxprToSDFG:
             is_scalar = False
         #
 
-        if(self.m_device is dace.DeviceType.CPU):
+        if( forceStorageType is not None):
+            storage: dace.StorageType = forceStorageType
+        elif(self.m_device is dace.DeviceType.CPU):
             storage = dace.StorageType.Default
         elif(self.m_device is dace.DeviceType.GPU):
             storage = dace.StorageType.GPU_Global
@@ -301,6 +316,8 @@ class JaxprToSDFG:
         - literals
         - former outputs of some equations.
         """
+        from sys import stderr
+
         if(self.m_jaxNameMap is None):          # Ensure that the name map is active.
             self.m_jaxNameMap = dict()
         if(not isinstance(self.m_sdfg, dace.SDFG)):
@@ -309,14 +326,17 @@ class JaxprToSDFG:
             raise ValueError(f"Expected that the argument list of the SDFG is empty but it already contains: {self.m_sdfg.arg_names}")
         #
 
-        # This ensures that the `sdfg.arg_names` member of the SDFG is a member variable and not a class variable.
-        #  This is for working around a bug DACE, and it seems that GT4Py depend on that bug.
-        #  See: https://github.com/spcl/dace/pull/1457
-        #self.m_sdfg.arg_names = []
+        # Transfering scalars to the GPU seams a bit of a problem, so we ensure that arrays are created.
+        #  The same is done for the output variable anyway.
+        forceArray = False
+        if((self.m_device is dace.DeviceType.GPU) and any([len(inp.aval.shape) == 0  for inp in jaxpr.jaxpr.invars])):
+            print(f"In GPU mode all scalar input variables are transformed into arrays with one element.", file=stderr, flush=True)
+            forceArray = True
+        #
 
         # We have to iterate through the non closed jaxpr, because there the names are removed.
         for inp in jaxpr.jaxpr.invars:
-            name = self._addArray(inp, isTransient=False)
+            name = self._addArray(inp, isTransient=False, forceArray=forceArray)
             self.m_sdfg.arg_names.append(name)
             self.m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
         #
@@ -390,10 +410,32 @@ class JaxprToSDFG:
         from copy import deepcopy
         assert self.m_jaxNameMap is not None
 
+        if(len(jaxpr.consts) == 0):
+            return
+        #
+        if(self.m_device is dace.DeviceType.GPU):
+            raise NotImplementedError("Constants are only implemented on CPU and not on GPU."
+                                      " But it seems that DaCe can not handle them as well.")
+        #
+
         # Interestingly the values and the names of the constants are kind of separated
-        for cName, cValue in zip(jaxpr.jaxpr.constvars, jaxpr.consts):
-            self.m_sdfg.add_constant(str(cName), deepcopy(cValue))
-            self.m_jaxNameMap[cName] = cName
+        for cJaxVar, cValue in zip(jaxpr.jaxpr.constvars, jaxpr.consts):
+            cJaxName = str(cJaxVar)         # Name of the variable in JAX
+
+            # Now we create an array inside the SDFG, but with a special name.
+            #  We add the two underscore to indicate that it is an internal.
+            cDaCeName  = self._addArray(cJaxVar,
+                                        isTransient=True,
+                                        altName=f"__const_{cJaxName}",
+                                        forceStorageType=dace.StorageType.Default,
+            )
+
+            # We have to pass the data descriptor to `add_constant` to link the array with the constant.
+            #  If we would not do that, we would have both of them; this is something that is not even documented.
+            self.m_sdfg.add_constant(cDaCeName, deepcopy(cValue), self.m_sdfg.arrays[cDaCeName])
+
+            # And now we add it to the map.
+            self.m_jaxNameMap[cJaxName] = cDaCeName
         #
         return
     # end def: _createConstants
