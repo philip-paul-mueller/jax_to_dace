@@ -222,8 +222,10 @@ class JaxprToSDFG:
         and calls `SDFG.add_scalar()` or `SDFG.add_array()` respectively.
         However, by setting `forceArray` to `True` the function will turn a `Scalar` into a one element `Array`.
 
-        The name of the entity that is created is usually `str(arg)`, however, the function will enforce some restrictions on that.
-        However, these restrictions are not applied to names passed through `altName`.
+        By default the name of the variable is `str(arg)`, but this not guaranteed.
+        For example if that name would be a forbidden name, i.e. a `C++` keyword, the will try to find a new one.
+        In case the variable name is given through `altName` a variable with that name will be created or an error is generated.
+        In any case teh function will return the name that was finally used.
 
         Which storage location is used depends on the device.
         For CPU `dace.StorageType.CPU` and for GPU `dace.StorageType.GPU` is used.
@@ -235,7 +237,7 @@ class JaxprToSDFG:
         Args:
             arg:                The Jax object that should be maped to dace.
             isTransient:        If a transent should be created, by default.
-            altName:            Use an alternative name.
+            altName:            Try to create the variable with this name.
             forceArray:         Turn scalar in one element arrays.
             forceStorageType:   Use this particular storage location.
 
@@ -255,20 +257,41 @@ class JaxprToSDFG:
             raise NotImplementedError(f"Jax Literals are not yet implemented.")
         else:
             raise TypeError(f"Does not know how to handle {type(arg)}.")
+        if((altName is not None) and (altName in self._forbiddenNames)):
+            raise ValueError(f"You used `altName` to create the forbidden name `{altName}`.")
         #
 
-        argName = str(arg) if altName is None else str(altName)     # Ensure that we have a string.
-        if argName in self.m_sdfg.arrays:
-            raise ValueError(f"The variable `{str(argName)}` is already recorded in the SDFG.")
+        # This is the proposed name of the array, we will perform some checks
+        #  and if needed rewritting furtherfurther down.
+        argName = str(arg) if altName is None else str(altName)
+
         if(len(argName) == 0):
             raise ValueError(f"Got an empty name.")
+        elif(not all([ x.isalnum() or x == '_'  for x in argName])):
+            raise ValueError(f"The requested variable name `{argName}` contained invalid characters.")
         elif(argName[0].isdigit()):
             raise ValueError(f"Requested to create the array '{argName}', is ilegal since it starts with a digit.")
         elif(any([x.isspace()  for x in argName])):
             raise ValueError(f"The name of the array, '{argName}', to create contained a space!")
         #
 
-        name      = argName
+        # Based on the provided name try to derive a replacmeent name.
+        if(argName in self._forbiddenNames):
+            nameTmpl = '_' + argName + '__{}'
+            for iCounter in range(1000):
+                _argName = nameTmpl.format(iCounter)
+                if(_argName not in self._forbiddenNames):
+                    argName = _argName
+                    break
+            else:
+                raise ValueError(f"Failed to find a replacement name for '{argName}'")
+            del iCounter, _argName
+        #
+
+        if argName in self.m_sdfg.arrays:
+            raise ValueError(f"The variable `{str(argName)}` is already recorded in the SDFG.")
+        #
+
         shape     = arg.aval.shape          # Shape of the array
         offset    = None                    # i.e. no offset
         strides   = None                    # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
@@ -291,18 +314,19 @@ class JaxprToSDFG:
         #
 
         if(is_scalar):
-            self.m_sdfg.add_scalar(name=name,
-                                   storage=storage, dtype=dtype, transient=isTransient
+            self.m_sdfg.add_scalar(
+                    name=argName,
+                    storage=storage, dtype=dtype, transient=isTransient
             )
         else:
             self.m_sdfg.add_array(
-                    name=name,
+                    name=argName,
                     shape=shape, strides=strides, offset=offset,
                     storage=storage, dtype=dtype, transient=isTransient
             )
         #
-        assert name in self.m_sdfg.arrays
-        return name
+        assert argName in self.m_sdfg.arrays        # Final check
+        return argName
     # end def: _addArray
 
 
@@ -634,5 +658,21 @@ class JaxprToSDFG:
         return dcDType
     # end def: _translateDType
 
+
+    ####################################
+    #   Forbidden variable names
+
+    _forbiddenNames: set[str] = {
+        # These should be most of the C++ keywords, it is more important to have the short ones.
+        #  Taken from `https://learn.microsoft.com/en-us/cpp/cpp/keywords-cpp?view=msvc-170`
+        'alignas', 'alignof', 'and', 'asm', 'auto', 'bitand', 'bitor', 'bool', 'break', 'case', 'catch',
+        'char', 'class', 'compl', 'concept', 'const', 'consteval', 'constexpr', 'constinit', 'continue',
+        'decltype', 'default', 'delete', 'directive', 'do', 'double', 'else', 'enum', 'explicit', 'export',
+        'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long', 'mutable',
+        'namespace', 'new', 'noexcept', 'not', 'nullptr', 'operator', 'or', 'private', 'protected',
+        'public', 'register', 'requires', 'return', 'short', 'signed', 'sizeof', 'static', 'struct',
+        'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union',
+        'unsigned', 'using', 'using', 'virtual', 'void', 'volatile', 'while', 'xor', 'std',
+    }
 # end class(JaxprToSDFG):
    
