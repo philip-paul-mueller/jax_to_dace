@@ -118,10 +118,11 @@ class JaxprToSDFG:
 
     def transform(self,
                   jaxpr,
-                  simplify = False,
-                  auto_opt = False,
+                  simplify: bool = False,
+                  auto_opt: bool = False,
                   device: Optional[DeviceType] = None,
-                  ret_by_arg = False,
+                  ret_by_arg: bool = False,
+                  iValidate: Optional[bool] = None,
     ) -> dace.SDFG:
         """Transforms `jaxpr` into an `SDFG`.
 
@@ -130,19 +131,28 @@ class JaxprToSDFG:
         Furthemore, by setting `auto_opt` to `True` the function will call `auto_optimize` on the `SDFG`.
         If `auto_opt` is an integer, that many times `auto_optimize` will be applied.
 
+        This function applies several DaCe transformations, some of them accepts a `validate` keyword.
+        You can influence the value that is passed to it through the `iValidate` argument,
+        however, in any case the function will perform a final validation.
+        By default this value is set to `None` in which case the behaviour depends on the device.
+        If the device is CPU then it is equal to `True` if it is GPU then it is equal to `False`.
+
+
         Args:
             jaxpr:          The `ClosedJaxpr` instance that should be translated.
             simplify:       Apply simplify to the generated `SDFG`.
             auto_opt:       Appy `auto_optimize` on the `SDFG` before returning it.
             device:         For which device to optimize for, if `None` the default one is used.
+            iValidate:      Controles if _intermediate_ validation should be performed.
             ret_by_arg:     Return the result by arguments, defaults to `False`.
-
 
         Notes:
             If `ret_by_arg` is set to `True` then the SDFG will transform the return statement `return A`
                 into an assignement, `_out[:] = A[:]`, where `_out` is a pseudo argument that is added at
                 the end to the argument list. If multiple values are returned then the variables will be
                 named `_out{i}`.
+            The strange behaviour of the `iValidate=None` is due to some strange behaviour in DaCe.
+                Furthermore this whole solution is not a permanent one.
         """
         import dace
         from dace import SDFG
@@ -172,15 +182,24 @@ class JaxprToSDFG:
         try:
             self.m_device = self.m_def_device if device is None else device
 
+            # Controles if we perform intermediate validation.
+            if(iValidate is None):
+                if(self.m_device == DeviceType.GPU):    intermediate_validation = False
+                else:                                   intermediate_validation = True
+            else:
+                intermediate_validation = iValidate
+            #
+
             jaxSDFG: SDFG = self._transform(jaxpr=jaxpr, ret_by_arg=ret_by_arg)   # Perform the translation.
 
-            if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
-                jaxSDFG.apply_gpu_transformations()
-
             if(simplify):
-                jaxSDFG.simplify()
+                jaxSDFG.simplify(validate=intermediate_validation)
             for _ in range(auto_opt):
-                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=self.m_device)
+                # We make no validation, here to avoid some issue.
+                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=self.m_device, validate=intermediate_validation)
+            #
+            if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
+                jaxSDFG.apply_gpu_transformations(validate=intermediate_validation)
             #
             jaxSDFG.validate()      # This function throws if an error is detected.
 
@@ -188,7 +207,7 @@ class JaxprToSDFG:
             raise
 
         else:
-            self._clearState()
+            self._clearState()      # Not in `finally` to ensure that the state can be inspected after an error.
 
         return jaxSDFG
     # end def: transform
