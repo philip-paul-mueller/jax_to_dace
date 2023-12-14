@@ -1,6 +1,7 @@
 import numpy as np
 import jax
 import dace
+import sys
 
 from typing import Optional
 
@@ -199,7 +200,8 @@ class JaxprToSDFG:
                 jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=self.m_device, validate=intermediate_validation)
             #
             if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
-                jaxSDFG.apply_gpu_transformations(validate=intermediate_validation)
+                jaxSDFG.apply_gpu_transformations(validate=intermediate_validation, validate_all=False)
+                jaxSDFG.simplify(validate=intermediate_validation, validate_all=False)
             #
             jaxSDFG.validate()      # This function throws if an error is detected.
 
@@ -208,6 +210,7 @@ class JaxprToSDFG:
 
         else:
             self._clearState()      # Not in `finally` to ensure that the state can be inspected after an error.
+                                    #  TODO: Put it in the beginning as well, to avoid annoying error.
 
         return jaxSDFG
     # end def: transform
@@ -232,7 +235,7 @@ class JaxprToSDFG:
             isTransient: bool = True,
             altName: Optional[str] = None,
             forceArray: Optional[bool] = None,
-            forceStorageType: Optional[dace.StorageType] = None,
+            forceStorageType: None = None,
     ) -> str:
         """Creates an array inside Dace for `arg` and return its name.
 
@@ -246,10 +249,6 @@ class JaxprToSDFG:
         In case the variable name is given through `altName` a variable with that name will be created or an error is generated.
         In any case teh function will return the name that was finally used.
 
-        Which storage location is used depends on the device.
-        For CPU `dace.StorageType.CPU` and for GPU `dace.StorageType.GPU` is used.
-        However, you by specifing `forceStorageType` you can force a particular type.
-
         Returns:
             The name of the array inside `self.m_sdfg`.
 
@@ -258,7 +257,7 @@ class JaxprToSDFG:
             isTransient:        If a transent should be created, by default.
             altName:            Try to create the variable with this name.
             forceArray:         Turn scalar in one element arrays.
-            forceStorageType:   Use this particular storage location.
+            forceStorageType:   This parameter is ignored and if not `None` an error is issued.
 
         Notes:
             This function does not update the internal variable map, thus you should not use it, except you know what you are doing.
@@ -276,6 +275,8 @@ class JaxprToSDFG:
             raise NotImplementedError(f"Jax Literals are not yet implemented.")
         else:
             raise TypeError(f"Does not know how to handle {type(arg)}.")
+        if(forceStorageType is not None):
+            print(f"The `forceStorageType` is ignored remove it.", file=sys.stderr, flush=True)
         if((altName is not None) and (altName in self._forbiddenNames)):
             raise ValueError(f"You used `altName` to create the forbidden name `{altName}`.")
         #
@@ -311,25 +312,16 @@ class JaxprToSDFG:
             raise ValueError(f"The variable `{str(argName)}` is already recorded in the SDFG.")
         #
 
-        shape     = arg.aval.shape          # Shape of the array
-        offset    = None                    # i.e. no offset
-        strides   = None                    # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
+        shape     = arg.aval.shape                          # Shape of the array
+        offset    = None                                    # i.e. no offset
+        strides   = None                                    # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
+        storage   = dace.StorageType.Default                # Will be specialized later by the transformations.
         is_scalar = (shape == ())
         dtype     = self._translateDType(arg.aval.dtype)
 
         if(is_scalar and forceArray):       # "cast" the argument to an array.
             shape     = (1, )
             is_scalar = False
-        #
-
-        if( forceStorageType is not None):
-            storage: dace.StorageType = forceStorageType
-        elif(self.m_device is dace.DeviceType.CPU):
-            storage = dace.StorageType.Default
-        elif(self.m_device is dace.DeviceType.GPU):
-            storage = dace.StorageType.GPU_Global
-        else:
-            raise ValueError(f"can not translate the device type `{self.m_device}` to a storage type.")
         #
 
         if(is_scalar):
@@ -470,7 +462,6 @@ class JaxprToSDFG:
             cDaCeName  = self._addArray(cJaxVar,
                                         isTransient=True,
                                         altName=f"__const_{cJaxName}",
-                                        forceStorageType=dace.StorageType.Default,
             )
 
             # We have to pass the data descriptor to `add_constant` to link the array with the constant.
