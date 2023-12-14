@@ -196,14 +196,18 @@ class JaxprToSDFG:
             if(simplify):
                 jaxSDFG.simplify(validate=intermediate_validation)
             for _ in range(auto_opt):
-                # We make no validation, here to avoid some issue.
-                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=self.m_device, validate=intermediate_validation)
+                # Regardless if we are on GPU or not, we always optimize for CPU.
+                #  It is basically the same idea as we used for `intermediate_validation==False` in that case.
+                #  The deeper reason is, if we would set it to `GPU` then we get errors in some validation process.
+                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=dace.DeviceType.CPU, validate=intermediate_validation)
             #
             if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
                 jaxSDFG.apply_gpu_transformations(validate=intermediate_validation, validate_all=False)
-                jaxSDFG.simplify(validate=intermediate_validation, validate_all=False)
+                jaxSDFG.simplify(validate=intermediate_validation, validate_all=False)  # The documentation recommends this.
             #
-            jaxSDFG.validate()      # This function throws if an error is detected.
+
+            # Since we have disabled all validations until now we now have to ensure that everything went well.
+            jaxSDFG.validate()
 
         except:
             raise
