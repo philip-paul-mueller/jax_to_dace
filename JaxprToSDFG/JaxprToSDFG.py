@@ -124,6 +124,7 @@ class JaxprToSDFG:
                   device: Optional[DeviceType] = None,
                   ret_by_arg: bool = False,
                   iValidate: Optional[bool] = None,
+                  inp_on_gpu: bool = False,
     ) -> dace.SDFG:
         """Transforms `jaxpr` into an `SDFG`.
 
@@ -138,6 +139,12 @@ class JaxprToSDFG:
         By default this value is set to `None` in which case the behaviour depends on the device.
         If the device is CPU then it is equal to `True` if it is GPU then it is equal to `False`.
 
+        Even in case `device` was set to `DeviceType.GPU` the generated SDFG assumes that the input arguments are on the host.
+        Thus compiling it will insert code that will first copy them from the CPU to the GPU and then copy the result value back.
+        This means that changes to the input argument will have no effect (TODO: verify this).
+        However, by setting `inp_on_gpu` to `True` the input arguments will be already on GPU, it is the responsibility of the
+        user to ensure that this is the case.
+
 
         Args:
             jaxpr:          The `ClosedJaxpr` instance that should be translated.
@@ -146,6 +153,7 @@ class JaxprToSDFG:
             device:         For which device to optimize for, if `None` the default one is used.
             iValidate:      Controles if _intermediate_ validation should be performed.
             ret_by_arg:     Return the result by arguments, defaults to `False`.
+            inp_on_gpu:     In GPU mode the inputs _and_ output arguments are expected to be on the GPU, ignored otherwhise.
 
         Notes:
             If `ret_by_arg` is set to `True` then the SDFG will transform the return statement `return A`
@@ -154,6 +162,7 @@ class JaxprToSDFG:
                 named `_out{i}`.
             The strange behaviour of the `iValidate=None` is due to some strange behaviour in DaCe.
                 Furthermore this whole solution is not a permanent one.
+                However, a normal user should probably never use this argument.
         """
         import dace
         from dace import SDFG
@@ -161,8 +170,6 @@ class JaxprToSDFG:
 
         if(not jax.config.jax_enable_x64):
             raise ValueError("`x64` Support was disabled, you have to enable it by calling `jax.config.update('jax_enable_x64', True)` before anything else.")
-        #
-
         if(not isinstance(jaxpr, ClosedJaxpr)):
             raise TypeError(f"The `jaxpr` you passed was not a `ClosedJaxpr` instance, you have to applied `jax.make_jaxpr()` to it first and concretize it.")
         #
@@ -203,6 +210,8 @@ class JaxprToSDFG:
             #
             if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
                 jaxSDFG.apply_gpu_transformations(validate=intermediate_validation, validate_all=False)
+                if(inp_on_gpu):
+                    self._relocateSignatureArgsToGPU(jaxpr=jaxpr, validate=intermediate_validation)
                 jaxSDFG.simplify(validate=intermediate_validation, validate_all=False)  # The documentation recommends this.
             #
 
@@ -354,6 +363,13 @@ class JaxprToSDFG:
         - they are either initial input
         - literals
         - former outputs of some equations.
+
+        thus they will already exists.
+
+        Notes:
+            This function will always place the input arguments on the CPU.
+                To relocate (in the SDFG) them to the GPU use the `_relocateSignatureArgsToGPU()`.
+            In GPU mode all scalars are turned into arrays of length one.
         """
         from sys import stderr
 
@@ -388,6 +404,9 @@ class JaxprToSDFG:
                             ret_by_arg: bool
     ):
         """Creates the return value statement.
+
+        This function will always allocate the return variables on the host.
+        For relocating them to the GPU use `_relocateSignatureArgsToGPU()`.
 
         Args:
             jaxpr:          The `ClosedJaxpr` for which the return statements should be created.
@@ -441,6 +460,35 @@ class JaxprToSDFG:
 
         return
     # end def: _createReturnOutput
+
+
+    def _relocateSignatureArgsToGPU(
+            self,
+            jaxpr: ClosedJaxpr,
+            validate: bool,
+    ):
+        """This function "relocates" the input and output arguments from the host to the CPU.
+
+        Basically this is done by interating through the list of arrays and change their storage.
+        Afterwards the function performs a simplification step.
+
+        Notes:
+            This function _must_ be run after the GPU transformations were applied.
+        """
+
+        # Set all arguments to global storage.
+        for sdfgName in self.m_sdfg.arg_names:
+            assert sdfgName in self.m_sdfg.arrays
+            sdfgArray = self.getArray(sdfgName)
+            sdfgArray.storage = dace.StorageType.GPU_Global
+        # end for(sdfgName):
+
+        # For the automatic copying of variables DaCe created transients on the GPU, (prfixed with `gpu_`).
+        #  They are now unnecessary and we get rid of them by calling the simplificiation step.
+        self.m_sdfg.simplify(validate_all=validate)
+
+        return
+    # end def: _relocateSignatureArgsToGPU
 
 
     def _createConstants(self, jaxpr: ClosedJaxpr):
