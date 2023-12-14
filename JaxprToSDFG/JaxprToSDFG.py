@@ -45,7 +45,8 @@ class JaxprToSDFG:
 
     def __init__(
             self,
-            device: DeviceType = DeviceType.CPU
+            device: DeviceType = DeviceType.CPU,
+            inp_on_gpu: bool = False,
     ):
         """`self` is generally stateless, but maintains some variables during translation.
 
@@ -54,11 +55,13 @@ class JaxprToSDFG:
 
         Args:
             device:     The default device for which we should generate, defaults to `CPU`.
+            inp_on_gpu  The default value for the `inp_on_gpu` argument of the `transform()` function.
         """
         # We now allocate the variables of the internal state (by calling the clear function)
         self._clearState()
 
-        self.m_def_device = device
+        self.m_def_device     = device
+        self.m_def_inp_on_gpu = inp_on_gpu
     #
 
 
@@ -124,7 +127,7 @@ class JaxprToSDFG:
                   device: Optional[DeviceType] = None,
                   ret_by_arg: bool = False,
                   iValidate: Optional[bool] = None,
-                  inp_on_gpu: bool = False,
+                  inp_on_gpu: Optional[bool] = None,
     ) -> dace.SDFG:
         """Transforms `jaxpr` into an `SDFG`.
 
@@ -144,7 +147,7 @@ class JaxprToSDFG:
         This means that changes to the input argument will have no effect (TODO: verify this).
         However, by setting `inp_on_gpu` to `True` the input arguments will be already on GPU, it is the responsibility of the
         user to ensure that this is the case.
-
+        If that argument is `None`, the default, then the value of `inp_on_gpu` passed during construction will be used.
 
         Args:
             jaxpr:          The `ClosedJaxpr` instance that should be translated.
@@ -174,6 +177,9 @@ class JaxprToSDFG:
             raise TypeError(f"The `jaxpr` you passed was not a `ClosedJaxpr` instance, you have to applied `jax.make_jaxpr()` to it first and concretize it.")
         #
 
+        if(inp_on_gpu is None):
+            inp_on_gpu = self.m_def_inp_on_gpu
+        #
         if(auto_opt is True):
             auto_opt = 1
         elif(auto_opt is False  or  auto_opt is None):
