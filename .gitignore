@@ -12,6 +12,7 @@ __pycache__/
 $
 junk/
 .vscode/
+.idea/
 
 # Symlinks
 dace
