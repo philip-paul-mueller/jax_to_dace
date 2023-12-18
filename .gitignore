@@ -9,6 +9,9 @@ __pycache__/
 *.json
 *.sdfg
 
+*.svg
+*.png
+
 $
 junk/
 .vscode/
