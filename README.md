@@ -29,6 +29,9 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 
 Not yet implemented, sort roughly according to importances:
 - [ ] `scatter_add`
+- [ ] `while`
+- [ ] `fori`
+- [ ] `cond` (conditional)
 - [ ] `scan`
 - [ ] `clamp`
 - [ ] `copy`
