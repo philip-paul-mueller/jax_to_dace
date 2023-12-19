@@ -5,7 +5,7 @@ If you make your own tests, please create a new file for this, merging will be s
 
 ## Dependencies
 - `JAX`: Vanilla version.
-- `gt4py`: A Version that contains commit `ed77c4` (new argument order of SDFG).
+- `gt4py`: Vanilla version.
 - `DaCe`: A version that contains commit `206be9` (or the `_fast_call()` routine of the `CompiledSDFG`).
 
 
