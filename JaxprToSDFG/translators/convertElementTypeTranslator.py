@@ -1,5 +1,8 @@
 """This file contains a converter instance.
 """
+
+from sys import stderr
+
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
 
 from jax._src.core import JaxprEqn
@@ -12,7 +15,6 @@ class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
     """This class acts as a type caster.
 
     Due to the nature of SDFG and Jax this function essentially just copies the data around.
-    The actuall translation should be handled by SDFG.
     Furthermore this function ignores the `weak_type` flag.
     """
     __slots__ = ()
@@ -67,9 +69,10 @@ class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
         if(any([inVarNames[i] is None  for i in range(len(inVarNames))])):
             raise ValueError(f"Does not allow for literals in the input arguments.")
         if(eqn.invars[0].aval.shape == ()):
-            raise ValueError(f"The caster only works for arrays.")
+            raise ValueError(f"The caster only works for arrays; Output variable '{outVarNames[0]}'; {eqn.invars[0].aval.dtype} -> {eqn.invars[0].aval.dtype}.")
+        if(eqn.invars[0].aval.dtype == eqn.outvars[0].aval.dtype):
+            print(f"The casting of variable {inVarNames[0]} to {outVarNames[0]} is unnecessary, since both are of type {eqn.outvars[0].aval.dtype}", file=stderr)
         #
-
 
         # This code is inspired from the `numpy.full` function.
         inName    = inVarNames[0]

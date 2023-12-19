@@ -1,6 +1,7 @@
 import numpy as np
 import jax
 import dace
+import sys
 
 from typing import Optional
 
@@ -27,9 +28,14 @@ class JaxprToSDFG:
     Notes:
         Equations that only have `_` as output variables are ignored.
             It seems that `grad` inserts them.
+        If you start reading the code start at the `transform()` function.
+        The class only has a (allocated) members during the transformatiosn, otherwhise they are `None`.
+        If a translation failes the internal state is not deallocated, before you can use the object again,
+            you have to call `_clearState()` manually.
 
     Todo:
         Fully dynamic storage sizes or just the strides(?), i.e. make them symbols such that DaCe can play more.
+        Implement a JIT semantic.
     """
 
 
@@ -37,14 +43,25 @@ class JaxprToSDFG:
     #       Initialization
     #
 
-    def __init__(self):
-        """`self` is stateless so no constructor is needed.
+    def __init__(
+            self,
+            device: DeviceType = DeviceType.CPU,
+            inp_on_gpu: bool = False,
+    ):
+        """`self` is generally stateless, but maintains some variables during translation.
 
+        In addition there are some default values, that are permanently stored inside `self` and set through the constructor.
         The transformsers are set up in `_initEqnTranslators()`.
 
+        Args:
+            device:     The default device for which we should generate, defaults to `CPU`.
+            inp_on_gpu  The default value for the `inp_on_gpu` argument of the `transform()` function.
         """
         # We now allocate the variables of the internal state (by calling the clear function)
         self._clearState()
+
+        self.m_def_device     = device
+        self.m_def_inp_on_gpu = inp_on_gpu
     #
 
 
@@ -64,6 +81,10 @@ class JaxprToSDFG:
         """
         self.m_eqnTranslators: Optional[list[JaxIntrinsicTranslatorInterface]] = None
 
+        """Device that we traget.
+        """
+        self.m_device = None
+
 
         """This is the variable map, that maps the jax name to the name that is used inside the SDFG.
         You should not update this map directly instead use `_createInitialInputs()`, `_createReturnOutput()` or `_createJaxVariable()` that does this for you.
@@ -80,6 +101,9 @@ class JaxprToSDFG:
         if(self.m_eqnTranslators is not None):
             raise ValueError(f"The translators are already initialized.")
         self.m_eqnTranslators = []
+
+        # Add self to kwargs, such that classes can access it.
+        #kwargs['_driver'] = self
 
         for cls in ALL_TRAFOS:
             self.m_eqnTranslators.append( cls(*args, **kwargs) )
@@ -98,9 +122,12 @@ class JaxprToSDFG:
 
     def transform(self,
                   jaxpr,
-                  simplify = False,
-                  auto_opt = False,
-                  device: DeviceType = DeviceType.CPU,
+                  simplify: bool = False,
+                  auto_opt: bool = False,
+                  device: Optional[DeviceType] = None,
+                  ret_by_arg: bool = False,
+                  iValidate: Optional[bool] = None,
+                  inp_on_gpu: Optional[bool] = None,
     ) -> dace.SDFG:
         """Transforms `jaxpr` into an `SDFG`.
 
@@ -109,11 +136,36 @@ class JaxprToSDFG:
         Furthemore, by setting `auto_opt` to `True` the function will call `auto_optimize` on the `SDFG`.
         If `auto_opt` is an integer, that many times `auto_optimize` will be applied.
 
+        This function applies several DaCe transformations, some of them accepts a `validate` keyword.
+        You can influence the value that is passed to it through the `iValidate` argument,
+        however, in any case the function will perform a final validation.
+        By default this value is set to `None` in which case the behaviour depends on the device.
+        If the device is CPU then it is equal to `True` if it is GPU then it is equal to `False`.
+
+        Even in case `device` was set to `DeviceType.GPU` the generated SDFG assumes that the input arguments are on the host.
+        Thus compiling it will insert code that will first copy them from the CPU to the GPU and then copy the result value back.
+        This means that changes to the input argument will have no effect (TODO: verify this).
+        However, by setting `inp_on_gpu` to `True` the input arguments will be already on GPU, it is the responsibility of the
+        user to ensure that this is the case.
+        If that argument is `None`, the default, then the value of `inp_on_gpu` passed during construction will be used.
+
         Args:
-            jaxpr:      The `ClosedJaxpr` instance that should be translated.
-            simplify:   Apply simplify to the generated `SDFG`.
-            auto_opt:   Appy `auto_optimize` on the `SDFG` before returning it.
-            device:     For which device to optimize for.
+            jaxpr:          The `ClosedJaxpr` instance that should be translated.
+            simplify:       Apply simplify to the generated `SDFG`.
+            auto_opt:       Appy `auto_optimize` on the `SDFG` before returning it.
+            device:         For which device to optimize for, if `None` the default one is used.
+            iValidate:      Controles if _intermediate_ validation should be performed.
+            ret_by_arg:     Return the result by arguments, defaults to `False`.
+            inp_on_gpu:     In GPU mode the inputs _and_ output arguments are expected to be on the GPU, ignored otherwhise.
+
+        Notes:
+            If `ret_by_arg` is set to `True` then the SDFG will transform the return statement `return A`
+                into an assignement, `_out[:] = A[:]`, where `_out` is a pseudo argument that is added at
+                the end to the argument list. If multiple values are returned then the variables will be
+                named `_out{i}`.
+            The strange behaviour of the `iValidate=None` is due to some strange behaviour in DaCe.
+                Furthermore this whole solution is not a permanent one.
+                However, a normal user should probably never use this argument.
         """
         import dace
         from dace import SDFG
@@ -121,12 +173,13 @@ class JaxprToSDFG:
 
         if(not jax.config.jax_enable_x64):
             raise ValueError("`x64` Support was disabled, you have to enable it by calling `jax.config.update('jax_enable_x64', True)` before anything else.")
-        #
-
         if(not isinstance(jaxpr, ClosedJaxpr)):
             raise TypeError(f"The `jaxpr` you passed was not a `ClosedJaxpr` instance, you have to applied `jax.make_jaxpr()` to it first and concretize it.")
         #
 
+        if(inp_on_gpu is None):
+            inp_on_gpu = self.m_def_inp_on_gpu
+        #
         if(auto_opt is True):
             auto_opt = 1
         elif(auto_opt is False  or  auto_opt is None):
@@ -138,22 +191,47 @@ class JaxprToSDFG:
         else:
             raise TypeError(f"Does not know how to handle `{auto_opt}` ({type(auto_opt)}) passed as `auto_opt`.")
         assert isinstance(auto_opt, int) and (auto_opt >= 0)
+        assert getattr(self, "m_sdfg", None) is None
 
         try:
-            jaxSDFG: SDFG = self._transform(jaxpr)   # Perform the translation.
-            
-            if(simplify):
-                jaxSDFG.simplify()
-            for _ in range(auto_opt):
-                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=device)
+            self.m_device = self.m_def_device if device is None else device
+
+            # Controles if we perform intermediate validation.
+            if(iValidate is None):
+                if(self.m_device == DeviceType.GPU):    intermediate_validation = False
+                else:                                   intermediate_validation = True
+            else:
+                intermediate_validation = iValidate
             #
-            jaxSDFG.validate()      # This function throws if an error is detected.
 
-            return jaxSDFG
+            jaxSDFG: SDFG = self._transform(jaxpr=jaxpr, ret_by_arg=ret_by_arg)   # Perform the translation.
 
-        finally:
-            self._clearState()
-        #
+            if(simplify):
+                jaxSDFG.simplify(validate=intermediate_validation)
+            for _ in range(auto_opt):
+                # Regardless if we are on GPU or not, we always optimize for CPU.
+                #  It is basically the same idea as we used for `intermediate_validation==False` in that case.
+                #  The deeper reason is, if we would set it to `GPU` then we get errors in some validation process.
+                jaxSDFG = auto_optimize(sdfg=jaxSDFG, device=dace.DeviceType.CPU, validate=intermediate_validation)
+            #
+            if(self.m_device is dace.DeviceType.GPU):   # If needed we will now apply some simplifications to teh SDFG to make it GPU ready
+                jaxSDFG.apply_gpu_transformations(validate=intermediate_validation, validate_all=False)
+                if(inp_on_gpu):
+                    self._relocateSignatureArgsToGPU(jaxpr=jaxpr, validate=intermediate_validation)
+                jaxSDFG.simplify(validate=intermediate_validation, validate_all=False)  # The documentation recommends this.
+            #
+
+            # Since we have disabled all validations until now we now have to ensure that everything went well.
+            jaxSDFG.validate()
+
+        except:
+            raise
+
+        else:
+            self._clearState()      # Not in `finally` to ensure that the state can be inspected after an error.
+                                    #  TODO: Put it in the beginning as well, to avoid annoying error.
+
+        return jaxSDFG
     # end def: transform
 
 
@@ -170,24 +248,35 @@ class JaxprToSDFG:
     #   Variable Management
     #
 
-    def _addArray(self, arg, isTransient=True, altName=None, forceArray = False):
+    def _addArray(
+            self,
+            arg,
+            isTransient: bool = True,
+            altName: Optional[str] = None,
+            forceArray: Optional[bool] = None,
+            forceStorageType: None = None,
+    ) -> str:
         """Creates an array inside Dace for `arg` and return its name.
 
-        Note that this function, by defaults creates transients, which is different from `SDFG.add_array()`.
+        Note that this function, by defaults creates transients, which is different from `SDFG.add_array()`, that generates non transients by default.
         The function also distinguishes between `Scalar`s (having empty shapes) and `Array`s (non-empty shape)
         and calls `SDFG.add_scalar()` or `SDFG.add_array()` respectively.
         However, by setting `forceArray` to `True` the function will turn a `Scalar` into a one element `Array`.
 
-        The name of the entity that is created is usually `str(arg)`, however, the function will enforce some restrictions on that.
-        However, these restrictions are not applied to names passed through `altName`.
+        By default the name of the variable is `str(arg)`, but this not guaranteed.
+        For example if that name would be a forbidden name, i.e. a `C++` keyword, the will try to find a new one.
+        In case the variable name is given through `altName` a variable with that name will be created or an error is generated.
+        In any case teh function will return the name that was finally used.
 
         Returns:
             The name of the array inside `self.m_sdfg`.
 
         Args:
-            arg:            The Jax object that should be maped to dace.
-            isTransient:    If a transent should be created, by default.
-            forceArray:     Turn scalar in one element arrays.
+            arg:                The Jax object that should be maped to dace.
+            isTransient:        If a transent should be created, by default.
+            altName:            Try to create the variable with this name.
+            forceArray:         Turn scalar in one element arrays.
+            forceStorageType:   This parameter is ignored and if not `None` an error is issued.
 
         Notes:
             This function does not update the internal variable map, thus you should not use it, except you know what you are doing.
@@ -205,23 +294,47 @@ class JaxprToSDFG:
             raise NotImplementedError(f"Jax Literals are not yet implemented.")
         else:
             raise TypeError(f"Does not know how to handle {type(arg)}.")
+        if(forceStorageType is not None):
+            print(f"The `forceStorageType` is ignored remove it.", file=sys.stderr, flush=True)
+        if((altName is not None) and (altName in self._forbiddenNames)):
+            raise ValueError(f"You used `altName` to create the forbidden name `{altName}`.")
         #
 
-        argName = str(arg) if altName is None else str(altName)     # Ensure that we have a string.
-        if argName in self.m_sdfg.arrays:
-            raise ValueError(f"The variable `{str(arg)}` is already recorded in the SDFG.")
+        # This is the proposed name of the array, we will perform some checks
+        #  and if needed rewritting furtherfurther down.
+        argName = str(arg) if altName is None else str(altName)
+
         if(len(argName) == 0):
             raise ValueError(f"Got an empty name.")
+        elif(not all([ x.isalnum() or x == '_'  for x in argName])):
+            raise ValueError(f"The requested variable name `{argName}` contained invalid characters.")
         elif(argName[0].isdigit()):
-            raise ValueError(f"Requested to create the array '{arg}', is ilegal since it starts with a digit.")
+            raise ValueError(f"Requested to create the array '{argName}', is ilegal since it starts with a digit.")
         elif(any([x.isspace()  for x in argName])):
-            raise ValueError(f"The name of the array, '{arg}', to create contained a space!")
+            raise ValueError(f"The name of the array, '{argName}', to create contained a space!")
         #
 
-        name      = argName
-        shape     = arg.aval.shape          # Shape of the array
-        offset    = None                    # i.e. no offset
-        strides   = None                    # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
+        # Based on the provided name try to derive a replacmeent name.
+        if(argName in self._forbiddenNames):
+            nameTmpl = '_' + argName + '__{}'
+            for iCounter in range(1000):
+                _argName = nameTmpl.format(iCounter)
+                if(_argName not in self._forbiddenNames):
+                    argName = _argName
+                    break
+            else:
+                raise ValueError(f"Failed to find a replacement name for '{argName}'")
+            del iCounter, _argName
+        #
+
+        if argName in self.m_sdfg.arrays:
+            raise ValueError(f"The variable `{str(argName)}` is already recorded in the SDFG.")
+        #
+
+        shape     = arg.aval.shape                          # Shape of the array
+        offset    = None                                    # i.e. no offset
+        strides   = None                                    # TODO(phimuell): make it fully dynamic by using symbols and let dace figuring it out.
+        storage   = dace.StorageType.Default                # Will be specialized later by the transformations.
         is_scalar = (shape == ())
         dtype     = self._translateDType(arg.aval.dtype)
 
@@ -231,15 +344,19 @@ class JaxprToSDFG:
         #
 
         if(is_scalar):
-            self.m_sdfg.add_scalar(name=name, dtype=dtype, transient=isTransient)
+            self.m_sdfg.add_scalar(
+                    name=argName,
+                    storage=storage, dtype=dtype, transient=isTransient
+            )
         else:
             self.m_sdfg.add_array(
-                    name=name, shape=shape, strides=strides,
-                    offset=offset, dtype=dtype, transient=isTransient
+                    name=argName,
+                    shape=shape, strides=strides, offset=offset,
+                    storage=storage, dtype=dtype, transient=isTransient
             )
         #
-        assert name in self.m_sdfg.arrays
-        return name
+        assert argName in self.m_sdfg.arrays        # Final check
+        return argName
     # end def: _addArray
 
 
@@ -252,7 +369,16 @@ class JaxprToSDFG:
         - they are either initial input
         - literals
         - former outputs of some equations.
+
+        thus they will already exists.
+
+        Notes:
+            This function will always place the input arguments on the CPU.
+                To relocate (in the SDFG) them to the GPU use the `_relocateSignatureArgsToGPU()`.
+            In GPU mode all scalars are turned into arrays of length one.
         """
+        from sys import stderr
+
         if(self.m_jaxNameMap is None):          # Ensure that the name map is active.
             self.m_jaxNameMap = dict()
         if(not isinstance(self.m_sdfg, dace.SDFG)):
@@ -261,10 +387,17 @@ class JaxprToSDFG:
             raise ValueError(f"Expected that the argument list of the SDFG is empty but it already contains: {self.m_sdfg.arg_names}")
         #
 
+        # Transfering scalars to the GPU seams a bit of a problem, so we ensure that arrays are created.
+        #  The same is done for the output variable anyway.
+        forceArray = False
+        if((self.m_device is dace.DeviceType.GPU) and any([len(inp.aval.shape) == 0  for inp in jaxpr.jaxpr.invars])):
+            print(f"In GPU mode all scalar input variables are transformed into arrays with one element.", file=stderr, flush=True)
+            forceArray = True
+        #
+
         # We have to iterate through the non closed jaxpr, because there the names are removed.
-        self.m_sdfg.arg_names = []
         for inp in jaxpr.jaxpr.invars:
-            name = self._addArray(inp, isTransient=False)
+            name = self._addArray(inp, isTransient=False, forceArray=forceArray)
             self.m_sdfg.arg_names.append(name)
             self.m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
         #
@@ -272,22 +405,46 @@ class JaxprToSDFG:
     # end def: _createInitialInputs
 
 
-    def _createReturnOutput(self, jaxpr: ClosedJaxpr):
+    def _createReturnOutput(self,
+                            jaxpr: ClosedJaxpr,
+                            ret_by_arg: bool
+    ):
         """Creates the return value statement.
+
+        This function will always allocate the return variables on the host.
+        For relocating them to the GPU use `_relocateSignatureArgsToGPU()`.
+
+        Args:
+            jaxpr:          The `ClosedJaxpr` for which the return statements should be created.
+            ret_by_arg:     Create a pseudoargument to return the value instead, see `self.transform()` for more.
         """
+        nbOutVars: int = len(jaxpr.jaxpr.outvars)
+        retTuple: bool = nbOutVars > 1
+        if(nbOutVars == 0):
+            raise ValueError(f"Passed zero putput variables.")
+        #
+
+        # Determine the name of the return value.
+        if(ret_by_arg):
+            if(retTuple):   retValNameTempl: str = '_out{}'
+            else:           retValNameTempl: str = '_out'            # Pseudoargument in which the value is returned.
+        else:
+            if(retTuple):   retValNameTempl: str = '__return_{}'
+            else:           retValNameTempl: str = '__return'        # Special SDFG name.
+        #
 
         # Create now the arrays that we use as output, these are the special `__return` / `__return_{IDX}` variables.
         outVarMap: dict[str, str] = {}
-        for i in range(len(jaxpr.jaxpr.outvars)):
-            jaxOutVar  = jaxpr.jaxpr.outvars[i]                                                         # Name of the variable inside jax/SDFG
-            SDFGoutVar = ('__return' if len(jaxpr.jaxpr.outvars) == 1 else '__return_{}').format(i)     # This name will mark it as a return value.
+        sdfgOutVarOrder: list[str] = []
+        for i in range(nbOutVars):
+            jaxOutVar  = jaxpr.jaxpr.outvars[i]         # Name of the variable inside jax/SDFG
+            SDFGoutVar = retValNameTempl.format(i)      # This name will mark it as a return value.
 
             # Create an output array that has the same shape as `jaxOutVar` but with name `SDFGoutVar`.
             #  We have to force the creation of a container (otherwhise the code generator will safe the result in a pass by value argument).
             _ = self._addArray(jaxOutVar, isTransient=False, altName=SDFGoutVar, forceArray=True)
-
-            assert _ == SDFGoutVar
             outVarMap[str(jaxOutVar)] = SDFGoutVar
+            sdfgOutVarOrder.append(SDFGoutVar)
         # end for(i):
 
         # Now we create the return state.
@@ -299,8 +456,45 @@ class JaxprToSDFG:
             memlet = dace.Memlet.from_array(sVar, self.getArray(jVar))
             final_state.add_edge(jAN, None, sAN, None, memlet)                      # Now we add  the connection between them
         #
+
+        # If needed add the pseudo arguments to the argument list
+        if(ret_by_arg):
+            assert len(self.m_sdfg.arg_names) > 0
+            for sVar in sdfgOutVarOrder:
+                self.m_sdfg.arg_names.append(sVar)
+        #
+
         return
     # end def: _createReturnOutput
+
+
+    def _relocateSignatureArgsToGPU(
+            self,
+            jaxpr: ClosedJaxpr,
+            validate: bool,
+    ):
+        """This function "relocates" the input and output arguments from the host to the CPU.
+
+        Basically this is done by interating through the list of arrays and change their storage.
+        Afterwards the function performs a simplification step.
+
+        Notes:
+            This function _must_ be run after the GPU transformations were applied.
+        """
+
+        # Set all arguments to global storage.
+        for sdfgName in self.m_sdfg.arg_names:
+            assert sdfgName in self.m_sdfg.arrays
+            sdfgArray = self.getArray(sdfgName)
+            sdfgArray.storage = dace.StorageType.GPU_Global
+        # end for(sdfgName):
+
+        # For the automatic copying of variables DaCe created transients on the GPU, (prfixed with `gpu_`).
+        #  They are now unnecessary and we get rid of them by calling the simplificiation step.
+        self.m_sdfg.simplify(validate_all=validate)
+
+        return
+    # end def: _relocateSignatureArgsToGPU
 
 
     def _createConstants(self, jaxpr: ClosedJaxpr):
@@ -309,10 +503,31 @@ class JaxprToSDFG:
         from copy import deepcopy
         assert self.m_jaxNameMap is not None
 
+        if(len(jaxpr.consts) == 0):
+            return
+        #
+        if(self.m_device is dace.DeviceType.GPU):
+            raise NotImplementedError("Constants are only implemented on CPU and not on GPU."
+                                      " But it seems that DaCe can not handle them as well.")
+        #
+
         # Interestingly the values and the names of the constants are kind of separated
-        for cName, cValue in zip(jaxpr.jaxpr.constvars, jaxpr.consts):
-            self.m_sdfg.add_constant(str(cName), deepcopy(cValue))
-            self.m_jaxNameMap[cName] = cName
+        for cJaxVar, cValue in zip(jaxpr.jaxpr.constvars, jaxpr.consts):
+            cJaxName = str(cJaxVar)         # Name of the variable in JAX
+
+            # Now we create an array inside the SDFG, but with a special name.
+            #  We add the two underscore to indicate that it is an internal.
+            cDaCeName  = self._addArray(cJaxVar,
+                                        isTransient=True,
+                                        altName=f"__const_{cJaxName}",
+            )
+
+            # We have to pass the data descriptor to `add_constant` to link the array with the constant.
+            #  If we would not do that, we would have both of them; this is something that is not even documented.
+            self.m_sdfg.add_constant(cDaCeName, deepcopy(cValue), self.m_sdfg.arrays[cDaCeName])
+
+            # And now we add it to the map.
+            self.m_jaxNameMap[cJaxName] = cDaCeName
         #
         return
     # end def: _createConstants
@@ -352,11 +567,15 @@ class JaxprToSDFG:
     #   Internal Translation Routines
     #
 
-    def _transform(self, jaxpr: ClosedJaxpr) -> dace.SDFG:
-        """This function does the actuall transformation, but it does not reset the internal state.
+    def _transform(self,
+                   jaxpr: ClosedJaxpr,
+                   ret_by_arg: bool,
+        ) -> dace.SDFG:
+        """This function does the actuall transformation.
 
         You should not use this function directly, instead you should always call `self.transform()`.
         The reason is that `self.transform()` prepares the internal state of `self`.
+        Also look there for more information about the arguments.
         """
         if self.m_sdfg is not None:
             raise RuntimeError("Expected the that `self` is in an initial state, but it does not seem to be the case.")
@@ -397,7 +616,7 @@ class JaxprToSDFG:
         # end for(eqn): transforming
 
         # Handle the output stuff
-        self._createReturnOutput(jaxpr)
+        self._createReturnOutput(jaxpr, ret_by_arg=ret_by_arg)
 
         return self.m_sdfg
     # end def: _transform
@@ -414,7 +633,6 @@ class JaxprToSDFG:
         This function will also modify the current head.
         """
         assert isinstance(eqn, jax._src.core.JaxprEqn)
-        assert len(eqn.invars)  >  0, "Expected to find at least one input variable."
         assert len(eqn.outvars) >= 1, f"Expected to find at least one output variable for equation '{str(eqn)}' but it had {len(eqn.outvars)}"
         assert all([str(out) not in self.m_jaxNameMap  for out in eqn.outvars]), f"The outputs {[str(out)  for out in eqn.outvars if str(out) in self.m_jaxNameMap]} were already created."
         assert len(eqn.effects) == 0, "This class can only handle siode efect free equations."
@@ -508,5 +726,21 @@ class JaxprToSDFG:
         return dcDType
     # end def: _translateDType
 
+
+    ####################################
+    #   Forbidden variable names
+
+    _forbiddenNames: set[str] = {
+        # These should be most of the C++ keywords, it is more important to have the short ones.
+        #  Taken from `https://learn.microsoft.com/en-us/cpp/cpp/keywords-cpp?view=msvc-170`
+        'alignas', 'alignof', 'and', 'asm', 'auto', 'bitand', 'bitor', 'bool', 'break', 'case', 'catch',
+        'char', 'class', 'compl', 'concept', 'const', 'consteval', 'constexpr', 'constinit', 'continue',
+        'decltype', 'default', 'delete', 'directive', 'do', 'double', 'else', 'enum', 'explicit', 'export',
+        'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long', 'mutable',
+        'namespace', 'new', 'noexcept', 'not', 'nullptr', 'operator', 'or', 'private', 'protected',
+        'public', 'register', 'requires', 'return', 'short', 'signed', 'sizeof', 'static', 'struct',
+        'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union',
+        'unsigned', 'using', 'using', 'virtual', 'void', 'volatile', 'while', 'xor', 'std',
+    }
 # end class(JaxprToSDFG):
    

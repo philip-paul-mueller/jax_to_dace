@@ -1,8 +1,29 @@
-.ipynb_checkpoints/
+# Dace related stuff
 .dacecache/
+_dacegraphs/
+
+# Python related stuff
+.ipynb_checkpoints/
+__pycache__/
+
+*.json
+*.sdfg
+
+*.svg
+*.png
+
+$
+junk/
+.vscode/
+.idea/
+
+# Symlinks
 dace
 jax
-$
-__pycache__/
-_dacegraphs/
-junk/
+gt4py
+pyhpc
+
+# Stuff related with benchmarking
+*.pickle
+Philip__ICON_velocity_advection_stencil_20.py
+Equation_of_state.py

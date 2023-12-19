@@ -12,29 +12,29 @@ from typing import Union, Any
 
 
 class GatherTranslator(JaxIntrinsicTranslatorInterface):
-    """This implements the `select_n` Jax intrinsic which acts as a generalized `where`.
+    """Garther primitive.
 
-    Its general notation is:
-    ```
-        select_n(cond, *cases)
-    ```
-    `cond` is either a boolean (array) in which case `*cases` represents two arrays, and the behaviour is essentially the same `where`.
-    In the second mode `cond` is an integer array, whose elements are bound by `0 <= cond_i < N`, in that case `*cases` represents `N` different arrays, 
-    basically we have `cases[cond_i]`, i.e. indirect indexing.
+    There is a good picture [here](https://www.tensorflow.org/xla/operation_semantics#gather) for the 1D case.
+    Essentially, this function copies slices from one array to another array.
+    Where these slices start is specified by an index array.
+    For example it is used to implement advanc indexing.
 
-    As a simplification, the documentation makes it clear that _all_ arrays have the same shape, but scalars are allowed.
+    This is the result of several refinement steps and it should work quite well actually.
+    The only problem is that it has to perform the accessing of the index on its own.
+    However, I have not yet found a way to overcome that, I have the feeling that someing in DaCe is missing.
+
+    Todo:
+        Improve the indirection.
 
     See also:
-        https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.select_n.html#jax.lax.select_n
-
-    Notes:
-        This class is based on an earlier version of the `SimpleTranslator` class.
+        https://www.tensorflow.org/xla/operation_semantics#gather
+        https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.gather.html
     """
     __slots__ = ()
 
 
     def __init__(self):
-        """Initializes a `briadcast_in_dim` translators
+        """Initialize.
         """
         super().__init__()      # As requiered call the initializer of the super class
         pass                    # There is nothing to initialize.
@@ -84,10 +84,6 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
         idxArr     = eqn.invars[1]
         idxShape   = idxArr.aval.shape
 
-        if(len(idxShape) != 2):
-            raise NotImplementedError(f"Currently more than this is not supported.")
-        #
-
         dimension_numbers            = eqn.params['dimension_numbers']
         offset_dims: tuple[int, ...] = dimension_numbers.offset_dims
         collapsed_slice_dims         = dimension_numbers.collapsed_slice_dims
@@ -103,122 +99,110 @@ class GatherTranslator(JaxIntrinsicTranslatorInterface):
         # Over this the copy loop goes
         batch_dims = tuple([d  for d in range(len(outShape)) if d not in offset_dims])
 
-        # We assume this since it makes things a beet simpler.
-        #  Every additional dimension would add one level to the state machine.
-        if(len(batch_dims) != 1):
-            raise NotImplementedError(f"The process is only implemented for the case of one batch dimensions, but you have `{len(batch_dims)}` ({batch_dims})")
+        # Every batch dimenion is associated with one dimenions of of the index array, but there is always one dimension more in the index array.
+        #  This dimension contains the start indexes of the slice.
+        if((len(batch_dims) + 1) != len(idxShape)):
+            raise ValueError(f"There is a problem expected that the index array has a dimenision of {len(batch_dims) + 1}, but it had {len(idxShape)}")
         #
 
-        # There is no single map that we can put here, instead we need a loop consisting of the state machine, with a copy map in it.
-        #  Because of our assumption on the shape of `idxArr` from above, we know that we have to perfrom `idxShape[0]` many iterations.
-        SDFG: dace.SDFG = translator.getSDFG()
+        # These are the dimensions (of the input) for which a mpa index is created.
+        inpDimWithMapIdx = tuple([dim  for dim in range(len(slice_sizes)) if dim not in collapsed_slice_dims])
+        assert len(inpDimWithMapIdx) == len(offset_dims)
 
-        loop_var    = f'__gather_{outArrName}__loop_var'    # This is the state loop index of the state machine.
-        nbStateIter = idxShape[0]                           #  This is the number of loops that we have to perfrom.
+        # We will gather implement as a copy tasklet.
+        #  The reason for this is that the tasklet has to do its onw access to the array, sicne the index we have to access is inside `idxArr`.
+        #  Every batch dimension has its own loop variable
+        nbStateIters = idxShape[:-1]
+        loopVars     = tuple([f'__i{outArrName}_gather{bd}'  for bd in batch_dims])
 
-        if(nbStateIter <= 0):
-            raise ValueError(f"In translation of `{str(eqn)}` have to perform the invalid number of `{nbStateIter}` state iterations.")
-        #
+        idxArrySub = []         # Array to store how the access in the tasklet has to be performed.
+        itSpaceVar = {}         # Stores the slice iteration variables used in each dimension.
 
-        # These are the states that we need in this state machine.
-        entry_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__meta_entry')
-        guard_state: dace.SDFGState       = SDFG.add_state(f'_gather_{outArrName}__guard')
-        loop_body_state: dace.SDFGState   = SDFG.add_state(f'_gather_{outArrName}__loop_body')
-        loop_end_state: dace.SDFGState    = SDFG.add_state(f'_gather_{outArrName}__loop_end')
-
-        # After the states we have to create the connections between them
-        SDFG.add_edge(eqnState,        entry_state,     data=InterstateEdge())
-        SDFG.add_edge(entry_state,     guard_state,     data=InterstateEdge(assignments={loop_var: "0"}))
-        SDFG.add_edge(guard_state,     loop_end_state,  data=InterstateEdge(condition=f'{loop_var} == {nbStateIter}'))
-        SDFG.add_edge(loop_body_state, guard_state,     data=InterstateEdge(assignments={loop_var: f'{loop_var} + 1'}))
-
-        # These creates the variables `__i{dim}_gather_offset` that we use to read the index
-        #  that describes where the patch in the index starts.
-        assignments = {}
-        for i, dim in enumerate(start_index_map):
-            assignments[f'__i{dim}_gather_offset'] = f'{idxArrName}[{loop_var}, {i}]'
-        #
-        SDFG.add_edge(
-            src=guard_state,
-            dst=loop_body_state,
-            data=InterstateEdge(
-                condition=f'{loop_var} != {nbStateIter}',       # Check if the loop has ended.
-                assignments=assignments,
-            )
-        )
-
-        # This is the corrected slice size window, where we have colapsed away 1 sized dimensions.
-        #  It is basically hwo much is copied in each iteration of the copy state machine.
-        #  If it is the empty tuple, then we have to copy around a scalar.
-        corr_slice_size = tuple([ss  for i, ss in enumerate(slice_sizes) if i not in collapsed_slice_dims])
-        assert len(corr_slice_size) == len(offset_dims)
-        is_scalar_patch = corr_slice_size == ()
-
-        tMapRanges = []         # Range of the map
-        tInputs_   = []         # Access elements.
-        itSpaceCnt = 0          # Counter for generating iteration space.
-        itSpaceVar = []
+        # Now we get the map ranges
+        #  Currently we will only collect the ones associated to the slices and ignore the batch domensions.
+        tMapRanges = []
         for dim, slice_size in enumerate(slice_sizes):
             if(dim not in start_index_map):
-                # This dimension is fully copied, by the map.
-                tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
-                tInputs_.append( tMapRanges[-1][0] )
-                itSpaceVar.append( tInputs_[-1] )
-                itSpaceCnt += 1
+                # This dimension is fully copied
+                tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
+                itSpaceVar[dim] = tMapRanges[-1][0]
+                idxArrySub.append( tMapRanges[-1][0] )          #there is nthing we have to read from the index array.
+                assert dim in inpDimWithMapIdx
+
             elif(dim in collapsed_slice_dims):
-                # It is collapsed so we only have to copy the element that is denoted.
-                #  For this we are using the index array.
-                tInputs_.append( f'__i{dim}_gather_offset' )
+                # This dimension is only partially copied, however, since the dimension is collapsed, only a single
+                #  entry is copied that comes from the index array.
+                idxArrySub.append( f'__gather_{dim}' )
 
             else:
-                # The dimension is not collapsed, but there is an offset, it also opens an iteration space
-                tMapRanges.append( (f'__i{itSpaceCnt}', f'0:{slice_size}') )
-                tInputs_.append( tMapRanges[-1][0] + f" + __i{dim}_gather_offset" )
-                itSpaceVar.append( tMapRanges[-1][0] )
-                itSpaceCnt += 1
+                # This dimension is partially copied, but since it is not colapsed, we need a map idex to copy the range.
+                #  However, there is also an offset that is involved from copying.
+                tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
+                idxArrySub.append( f'__gather_{dim} + {tMapRanges[-1][0]}' )
+                itSpaceVar[dim] = tMapRanges[-1][0]
+                assert dim in inpDimWithMapIdx
             #
+            assert len(slice_sizes) == len(inpShape)
         #
-        assert len(itSpaceVar) == len(offset_dims)
+
+        # Creating the input memlet that allows us to access the value array (from where we have to gather)
+        #  from inside the tasklet and make it accessable through the name `__arr`.
+        #  At this point it is not possible to tell where we access, because we are missing a index variables,
+        #  they will only be accessable inide the tasklet (see below), however, we know that we will access
+        #  only one element from the array.
+        #  The Python Frontend does something similar, but it uses states.
+        valMemlet = dace.Memlet.simple(
+                inpArrName,
+                ', '.join([f'0:{size}'  for size in inpShape]),
+                num_accesses=1,
+        )
+        tInputs = [ ('__arr', valMemlet) ]
+
+        # Now we are creating the memlts to access the index array and make them aviable inside the tasklet.
+        for i, dim in enumerate(start_index_map):
+            q = f'__gather_{dim}'                                   # Name of the index variable inside the tasklet.
+            m = dace.Memlet.simple(idxArrName, f', '.join(loopVars) + f', {i}')  # Geting it from `idxArr[loop_var..., i]`.
+            tInputs.append( (q, m) )
+        #
+
+        # Now we create the tasklet, as mentioned before it does a single access.
+        tCode = '__out = __arr[' + ', '.join(idxArrySub) + ']'
 
         # Now the output variables.
         tOutputs_ = []
+        mapIdxCnt = 0
         for dim in range(len(outShape)):
-            if(dim in offset_dims):
-                iDim = offset_dims.index(dim)
-                tOutputs_.append( itSpaceVar[iDim] )
+            if(dim in batch_dims):
+                # This is a batch dimension, thus a loop variable is used for it.
+                loopVar = loopVars[ batch_dims.index(dim) ]
+                tOutputs_.append( str(loopVar) )
+
             else:
-                assert len(batch_dims) == 1
-                tOutputs_.append( loop_var )
+                # This is an offeset dimension, this means that for this dimension a map index is requiered.
+                assert mapIdxCnt <= len(inpDimWithMapIdx)
+                currMapDim = inpDimWithMapIdx[mapIdxCnt]
+                mapIdxCnt += 1
+                tOutputs_.append( itSpaceVar[currMapDim] )
+            #
         #
+        assert mapIdxCnt == len(inpDimWithMapIdx)
+        tOutputs = [ ('__out', dace.Memlet.simple(outArrName, ', '.join(tOutputs_))) ]
 
-        # The code is also very simple
-        tCode = '__out0 = __in0'
-        tName = f"_gather_map_{outArrName}_"
+        # Now we have to insert the batch index or state variable.
+        tMapRanges = (
+                [ (loopVars[i], f'0:{nbStateIters[i]}')  for i in range(len(batch_dims)) ]
+                + tMapRanges
+        )
 
-        if(is_scalar_patch):
-            inAN  = loop_body_state.add_read(inpArrName)
-            outAN = loop_body_state.add_write(outArrName)
-            memlet = dace.Memlet(
-                    data=inVarNames[0],
-                    subset=', '.join(tInputs_),
-                    other_subset=', '.join(tOutputs_),
-            )
-            loop_body_state.add_nedge(inAN, outAN, memlet)
-
-        else:
-            tInputs  = [ ('__in0',  dace.Memlet.simple(inpArrName, ', '.join(tInputs_)))   ]
-            tOutputs = [ ('__out0', dace.Memlet.simple(outArrName, ', '.join(tOutputs_))) ]
-            loop_body_state.add_mapped_tasklet(
-                name=tName,
-                map_ranges=self._listToDict(tMapRanges),
-                inputs=self._listToDict(tInputs),
-                code=tCode,
-                outputs=self._listToDict(tOutputs),
-                external_edges=True,
-            )
-        #
-
-        return loop_end_state
+        eqnState.add_mapped_tasklet(
+            name=f"_gather_map_{outArrName}",
+            map_ranges=self._listToDict(tMapRanges),
+            inputs=self._listToDict(tInputs),
+            code=tCode,
+            outputs=self._listToDict(tOutputs),
+            external_edges=True,
+        )
+        return eqnState
     # end def: translateEqn
 
 

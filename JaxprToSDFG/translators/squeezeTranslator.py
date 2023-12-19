@@ -8,9 +8,10 @@ from typing import Union
 
 
 class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
-    """This class handles the squeezing of an array, which is the removal of an dimension with length 1.
+    """Allows to remove dimensions with size one.
 
-    It is equivalent to the `np.squeeze` function.
+    Essentially equivalent to `np.squeeze`.
+    There are two different modes that are supported, either using a memlet (the default) or using a copy map.
     """
     __slots__ = ()
 
@@ -44,7 +45,6 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
     ):
         """Translate eqn into an SDFG that is created inside `eqnState`.
 
-
         Args:
             translator:     The `JaxprToSDFG` instance that is respnsible for the translation.
             inVarNames:     List of the names of the arrays created inside the SDFG for the inpts.
@@ -56,6 +56,8 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
             Jax only allows that the slicing parameters have static values.
             While the implementation could potentially handle a step size not equal than 1, Jax seems to implement that a bit different.
         """
+        use_map = False
+
         if(len(eqn.invars) != 1):
             raise ValueError(f"Squeezing only supports one input argument.")
         if(len(eqn.outvars) != 1):
@@ -78,42 +80,63 @@ class SqueezeTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Strange some dimensions that with a different length than one should be removed, shoudl remove: {[(dim, inShape[dtr])  for dim, dtr in enumerate(dims_to_remove)]}")
         #
 
+        if(use_map):
+            # The map ranges will go through all the output dimensions.
+            tMapRanges = []
+            for dim, dim_size in enumerate(outShape):
+                tMapRanges.append( (f'__i{dim}', f'0:{dim_size}') )
+            #
 
-        # The map ranges will go through all the output dimensions.
-        tMapRanges = []
-        for dim, dim_size in enumerate(outShape):
-            tMapRanges.append( (f'__i{dim}', f'0:{dim_size}') )
+            # The Outputs are also just iterating through everything.
+            tOutputs_ = []
+            for it, _ in tMapRanges:
+                tOutputs_.append(it)
+            #
+
+            # The inputs are a bit different, but also very simple
+            tInputs_ = []
+            itCnt = 0
+            for dim in range(len(inShape)):
+                if(dim in dims_to_remove):
+                    tInputs_.append('0')        # Only valid index
+                else:
+                    tInputs_.append(tMapRanges[itCnt][0])         # This dimension must have the same size.
+                    itCnt += 1
+                assert itCnt <= len(tMapRanges)
+            assert itCnt == len(tMapRanges)
+
+            tName = f'_squeeze_{outVarNames[0]}'
+            tCode = '__out = __in'
+
+            eqnState.add_mapped_tasklet(
+                name=tName,
+                map_ranges={k:v  for k, v in tMapRanges},
+                inputs={'__in': dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))},
+                code=tCode,
+                outputs={'__out': dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))},
+                external_edges=True,
+            )
+
+        else:
+            # Here we are using a memlet directly.
+            tInputs_, tOutputs_ = [], []
+
+            for dim, dim_size in enumerate(inShape):
+                tInputs_.append( f'0:{dim_size}' )      # The output is always present.
+                if(dim not in dims_to_remove):
+                    tOutputs_.append( tInputs_[-1] )
+            #
+
+            inAN   = eqnState.add_read(inVarNames[0])
+            outAN  = eqnState.add_write(outVarNames[0])
+            memlet = dace.Memlet(
+                        inVarNames[0],
+                        subset=', '.join(tInputs_),
+                        other_subset=', '.join(tOutputs_),
+            )
+            eqnState.add_nedge(inAN, outAN, memlet)
         #
 
-        # The Outputs are also just iterating through everything.
-        tOutputs_ = []
-        for it, _ in tMapRanges:
-            tOutputs_.append(it)
-        #
-
-        # The inputs are a bit different, but also very simple
-        tInputs_ = []
-        itCnt = 0
-        for dim in range(len(inShape)):
-            if(dim in dims_to_remove):
-                tInputs_.append('0')        # Only valid index
-            else:
-                tInputs_.append(tMapRanges[itCnt][0])         # This dimension must have the same size.
-                itCnt += 1
-            assert itCnt <= len(tMapRanges)
-        assert itCnt == len(tMapRanges)
-
-        tName = f'_squeeze_{outVarNames[0]}'
-        tCode = '__in = __out'
-
-        eqnState.add_mapped_tasklet(
-            name=tName,
-            map_ranges={k:v  for k, v in tMapRanges},
-            inputs={'__in': dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))},
-            code=tCode,
-            outputs={'__out': dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))},
-            external_edges=True,
-        )
         return eqnState
     # end def: translateEqn
 

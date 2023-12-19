@@ -10,8 +10,17 @@ from typing import Union
 class ConcatenateTranslator(JaxIntrinsicTranslatorInterface):
     """This handles concatenation of arrays.
 
-    In essence it implement `https://www.tensorflow.org/xla/operation_semantics#concatenate`.
-    Copy is implemented by several SDFGs that performs the assignment.
+    Input and outputs needs to have the same dimensionality (numbers of dimenisons).
+    Their shape has to match in all but one dimension, which is given by the parameter `dimensions`,
+    along which the concatenation is performed.
+
+    The concatenation is performed using memlets.
+
+    See also:
+        https://www.tensorflow.org/xla/operation_semantics#concatenate
+
+    Todo:
+        Turn the for loop into a map (maybe requieres a constant).
     """
     __slots__ = ()
 

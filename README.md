@@ -21,8 +21,36 @@ There are some todos, use `grep -i todo` to get an overview.
 ### Lists of Intrinsics
 Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/JaxDecompiler/blob/main/src/JaxDecompiler/primitive_mapping.py`:
 
+Not yet implemented, sort roughly according to importances:
+- [ ] `scatter_add`
+- [ ] `scan`
+- [ ] `clamp`
+- [ ] `copy`
+- [ ] `random_seed`
+- [ ] `random_unwrap`
+- [ ] `random_wrap`
+- [ ] `random_bits`
+- [ ] `shift_right_logical`
+- [ ] `shift_left_logical`
+- [ ] `sort`
+- [ ] `xla_pmap`
+- [ ] `xla_call`
+- [ ] `rev`
+- [ ] `conv_general_dilated`
+- [ ] `dynamic_slice`
+- [ ] `dynamic_update_slice`
+- [ ] `bitcast_convert_type`
+- [ ] `erf_inv`
+- [ ] `stop_gradient`
+- [ ] `transpose`
+- [ ] `iota`
+- [ ] `coo_fromdense`
+- [ ] `coo_matvec`
+
+
+Already implemented intrinsics (most of them are arithmetic operations, which are handled by `SimpleTranslator`)
 - [x] `add`
-- [ ] `add_any`
+- [x] `add_any`
 - [x] `mul`
 - [x] `sub`
 - [x] `neg`
@@ -31,7 +59,6 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `floor`
 - [x] `ceil`
 - [x] `round`
-- [ ] `clamp`
 - [x] `integer_pow`
 - [x] `pow`
 - [x] `sqrt`
@@ -45,16 +72,9 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `acos`
 - [x] `asin`
 - [x] `atan`
-- [ ] `copy`
 - [x] `convert_element_type`
 - [x] `reshape`
 - [x] `gather`
-- [ ] `random_seed`
-- [ ] `random_unwrap`
-- [ ] `random_wrap`
-- [ ] `random_bits`
-- [ ] `shift_right_logical`
-- [ ] `shift_left_logical`
 - [x] `concatenate`
 - [x] `squeeze`
 - [x] `argmin`
@@ -74,25 +94,11 @@ Here is a list of intrinsics, taken from `https://github.com/PierrickPochelu/Jax
 - [x] `gt`
 - [x] `le`
 - [x] `lt`
-- [ ] `sort`
 - [x] `reduce_or`
 - [x] `reduce_and`
-- [ ] `xla_pmap`
-- [ ] `xla_call`
-- [ ] `rev`
-- [ ] `conv_general_dilated`
-- [ ] `dynamic_slice`
 - [x] `slice`
-- [ ] `dynamic_update_slice`
-- [ ] `scatter_add`
-- [ ] `or__`
-- [ ] `and__`
-- [ ] `bitcast_convert_type`
-- [ ] `erf_inv`
-- [ ] `stop_gradient`
-- [ ] `transpose`
-- [ ] `iota`
-- [ ] `coo_fromdense`
-- [ ] `coo_matvec`
-- [ ] `scan`
+- [x] `or__`
+- [x] `and__`
+- [x] `not__`
+
 

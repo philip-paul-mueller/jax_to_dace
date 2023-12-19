@@ -1,8 +1,11 @@
 """This subpackage contains all concrete transformsations 
+
+If you write a new translator, import it here and add it to the `ALL_TRAFOS`.
+It will then automatically created by an `JaxprToSDFG` instance.
 """
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslatorInterface
-from .simpleTranslator                              import SimpleTranslator
+from .ALUTranslator                                 import ALUTranslator
 from .slicingTranslator                             import SlicingTranslator
 from .dotGeneralTranslator                          import DotGeneralTranslator
 from .reductionTranslator                           import ReductionTranslator
@@ -15,9 +18,10 @@ from .convertElementTypeTranslator                  import ConvertElementTypeTra
 from .devicePutTranslator                           import DevicePutTranslator
 from .pjitTranslator                                import PJITTranslator
 from .squeezeTranslator                             import SqueezeTranslator
+from .iotaTranslator                                import IotaTranslator
 
 ALL_TRAFOS = [
-    SimpleTranslator,
+    ALUTranslator,
     SlicingTranslator,
     DotGeneralTranslator,
     ReductionTranslator,
@@ -30,5 +34,6 @@ ALL_TRAFOS = [
     DevicePutTranslator,
     PJITTranslator,
     SqueezeTranslator,
+    IotaTranslator,
 ]
 

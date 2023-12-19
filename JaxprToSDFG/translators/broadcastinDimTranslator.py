@@ -8,6 +8,7 @@ import dace
 from dace import subsets
 from typing import Union
 from math import prod
+from sys import stderr
 
 
 class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
@@ -20,8 +21,12 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
         To which dimension in the target shape each dimension of the operand shape corresponds to.
         That is, dimension i of the operand becomes dimension broadcast_dimensions[i] of the result.
 
+    The class is able to broadcast arrays, esentially replicate them several times inside the target array.
+    Furthermore the class is also able to handle literals.
+
     Notes:
         It seams that Jax maps slicing with a non one step size to a combination of the `broadcast_in_dim` and `gather`.
+            But it seams that the slicing primitives would support a step size.
     """
     __slots__ = ()
 
@@ -71,6 +76,7 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             While the implementation could potentially handle a step size not equal than 1, Jax seems to implement that a bit different.
         """
         outShape     = eqn.outvars[0].aval.shape
+        inShape      = eqn.invars[0].aval.shape
         shape        = eqn.params['shape'               ]
         bDims        = eqn.params['broadcast_dimensions']
         inpIsLiteral = False
@@ -88,7 +94,27 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
 
         else:
             inShape  = eqn.invars[0].aval.shape
+            assert len(inShape) == len(bDims)
             assert len(bDims) > 0, f"Expected to find an array, but found a scalarish thing."
+        #
+
+        isBDimOrdered = False
+        if(len(bDims) == 0  and  (inpIsLiteral or inpIsScalar)):
+            isBDimOrdered = True        # Essentially 'numpy.full()'
+        elif(len(bDims) == 0  and  (not inpIsLiteral)):
+            raise ValueError(f"No broadcast dimension specified.")
+        elif(len(bDims) == 1):
+            isBDimOrdered = True
+        elif(all([bDims[i-1] < bDims[i]  for i in range(1, len(bDims))])):    
+            isBDimOrdered = True
+        #
+
+        sameNbOfElements = False
+        if(inpIsLiteral or inpIsScalar):
+            pass
+        elif(prod(inShape) == prod(outShape)):
+            # Essentially this reduces this functionality to the inverse of `squeeze`.
+            sameNbOfElements = True
         #
 
         if(len(eqn.invars) != 1):
@@ -99,37 +125,11 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError(f"Parameters specified a shape of `{shape}` but the output variable ad a shape of `{eqn.outvars[0].aval.shape}`.")
         if(outShape != shape):
             raise ValueError(f"shape of the output was `{outShape}`, but the specified shape was `{shape}`.")
-        if(len(bDims) == 0  and  (inpIsLiteral or inpIsScalar)):
-            pass            # Essentially 'numpy.full()'
-        elif(prod(inShape) == prod(outShape)):
-            pass            # essentially this should be a reshape (more test would be fine)
-        elif(len(bDims) == 0  and  (not inpIsLiteral)):
-            raise ValueError(f"No broadcast dimension specified.")
-        elif(len(bDims) == 1):
-            pass    # No test for sorting
-        elif(not all([bDims[i-1] < bDims[i]  for i in range(1, len(bDims))])):    
-            raise ValueError(f"This function assumes that `broadcast_dimensions` is sorted but it was not (`{bDims}`)")
+        if(not ( len(inShape) < len(outShape))):
+            raise ValueError(f"Starnge input, the output shape, `{outShape}`, has more dimensions that the input, `{inShape}`.")
         #
 
-        if((not (inpIsLiteral or inpIsScalar)) and ((len(bDims) == 1) or (prod(inShape) == prod(outShape)))):
-            # The code is inspired from the `reshape()` function of the python frontend
-            # TODO: Probably poting to view, but this allows to bypass aliasing.
-            inName    = inVarNames[0]
-            outName   = outVarNames[0]
-            inArr     = translator.getArray(inName)
-            outArr    = translator.getArray(outName)
-            inSet     = subsets.Range.from_array(inArr)
-            outSet    = subsets.Range.from_array(outArr)
-            readNode  = eqnState.add_read(inName)
-            writeNode = eqnState.add_write(outName)
-            memlet    = dace.Memlet(data=inName, subset=inSet, other_subset=outSet)
-
-            eqnState.add_nedge(readNode, writeNode, data=memlet)
-
-        elif((not (inpIsLiteral or inpIsScalar)) and (len(bDims) != 1)):
-            raise NotImplementedError(f"Multiple broadcast dimensions are not implemented.")
-
-        elif(inpIsLiteral or inpIsScalar):
+        if(inpIsLiteral or inpIsScalar):
             # This code is inspired from the `numpy.full` function.
             inName    = inVarNames[0]
             outName   = outVarNames[0]
@@ -150,15 +150,57 @@ class BroadcastInDimTranslator(JaxIntrinsicTranslatorInterface):
             #
 
             eqnState.add_mapped_tasklet(
-                '_fill_',
+                f'_scalar_broadcast_{str(eqn.outvars[0])}',
                 map_ranges={f"__i{dim}": f"0:{s}" for dim, s in enumerate(outShape)},
                 inputs=inputs,
                 code=f"__out = {tVal}",
                 outputs={'__out': dace.Memlet.simple(outName, ",".join([f"__i{dim}" for dim in range(len(outShape))]))},
                 external_edges=True
             )
+
+        elif(isBDimOrdered and sameNbOfElements):
+            # In essence this is an inversion of the `squeeze` operation.
+            tOutputs_ = ['0'  for _ in outShape]        # By default we always access the first index.
+            tInputs_  = []
+            for dim, (mapTo, size) in enumerate(zip(bDims, inShape)):
+                tInputs_.append( f'0:{size}' )
+                tOutputs_[mapTo] = tInputs_[-1]
+            #
+
+            inAN   = eqnState.add_read(inVarNames[0])
+            outAN  = eqnState.add_write(outVarNames[0])
+            memlet = dace.Memlet(
+                        inVarNames[0],
+                        subset=', '.join(tInputs_),
+                        other_subset=', '.join(tOutputs_),
+            )
+            eqnState.add_nedge(inAN, outAN, memlet)
+
+        # TODO: add this specialization that we can also remove the map in this case.
+        #elif(isBDimOrdered and (not sameNbOfElements)):
+
         else:
-            raise NotImplementedError(f"This case is not implemented.")
+            # We are using a map to copy the data arround. For thsi we will iterate through the entier output domain
+            tMapRanges = []
+            tOutputs_  = []
+            for dim, slice_size in enumerate(outShape):
+                tMapRanges.append( (f'__i{dim}', f'0:{slice_size}') )
+                tOutputs_.append( tMapRanges[-1][0] )
+            #
+
+            tInputs_ = []
+            for dim, mapTo in enumerate(bDims):
+                tInputs_.append( tMapRanges[mapTo][0] )
+            #
+
+            eqnState.add_mapped_tasklet(
+                f'_broadcast_{str(eqn.outvars[0])}',
+                map_ranges={k: v  for k, v in tMapRanges},
+                inputs=dict(__in=dace.Memlet.simple(inVarNames[0], ', '.join(tInputs_))),
+                code='__out = __in',
+                outputs=dict(__out=dace.Memlet.simple(outVarNames[0], ', '.join(tOutputs_))),
+                external_edges=True
+            )
         #
 
         return eqnState

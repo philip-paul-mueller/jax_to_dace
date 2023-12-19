@@ -1,4 +1,6 @@
 """This module contains the simple transformator.
+
+Essentailly it handles binary and unary arethmetical operations and mathematical functions.
 """
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
@@ -9,21 +11,19 @@ import numpy as np
 from typing import Union, Any
 
 
-class SimpleTranslator(JaxIntrinsicTranslatorInterface):
+class ALUTranslator(JaxIntrinsicTranslatorInterface):
     """This class handles all the simple cases where only one tasklet is used.
 
     Current restrictions of the translator:
     - either 1 or 2 input values.
     - exactly one output value.
-    - all non-literal operants (output and all inputs) must habe the same shape.
     - in the array case, i.e. output is an array, at least most one input can be a literal
     - in the scalar case all arguments can be litterals.
+    - broadcasting _should_ be fully supported by now.
+    - Reduction operatiors, such as `numpy.amin()` are not supported.
 
-    Examples for simple operations are:
-    - Arethmetic operations.
-    - Mathematical Functions.
-
-    However, `reducing` operations are not included, such as `numpy.amin`.
+    Todo:
+        Split this class into a binary and unarry part.
     """
     __slots__ = ("m_unarryOps", "m_binarryOps")
 
@@ -132,27 +132,31 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
         # if we are scalar or not it is sufficient to check if the output is.
         is_scalar = (len(eqn.outvars[0].aval.shape) == 0)
 
+        # Look if we have inputs as scalars.
+        inpScalars = [len(Inp.aval.shape) == 0  for i, Inp in enumerate(eqn.invars)]
+        hasScalarsAsInputs = any(inpScalars)
+        onlyScalarsAsInputs = all(inpScalars)
+
         if(not (1 <= len(eqn.invars) <= 2)):        # Never remove this ceck the whole code depends on that.
             raise ValueError(f"Expexted either 1 or 2 input variables but got {len(eqn.invars)}")
         if(len(eqn.outvars) != 1):
             raise ValueError(f"Expected only one return value of equation '{str(eqn)}' but it had {len(eqn.outvars)}")
         if(outVarNames[0] is None):
             raise ValueError(f"The outut name must be a real variable.")
-        if(not all([len(eqn.outvars[0].aval.shape) == len(eqn.invars[i].aval.shape)  for i in range(len(inVarNames)) if inVarNames[i] is not None])):
-            raise ValueError(f"Found shapes that differs in the number of dimensions: {eqn}.")
+        if(not all([len(eqn.outvars[0].aval.shape) == len(eqn.invars[i].aval.shape)  for i in range(len(inVarNames)) if (inVarNames[i] is not None) and (not inpScalars[i])])):
+            raise ValueError(f"Found shapes that differs in the number of dimensions, outVar `{outVarNames[0]}`.")
         if(not all([isinstance(inVarNames[i], str) or (inVarNames[i] is None and eqn.invars[i].aval.shape == ())  for i in range(len(inVarNames))])):
             raise ValueError(f"Found some strange input that is not handled.")
         if(len(eqn.effects) != 0):
             raise ValueError(f"Can only handle equations without any side effects.")
         #
 
-
         # We are now checking if there is broadcasting going on.
         has_some_literals = any([x is None  for x in inVarNames])
-        if((not has_some_literals) and (not all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))]))):
+        inpsSameShape     = all([eqn.invars[0].aval.shape == eqn.invars[i].aval.shape  for i in range(1, len(eqn.invars))])
+        if((not has_some_literals) and (not inpsSameShape) and (not hasScalarsAsInputs)):
             # There are shapes that differ, this might indicate broadcasting.
             #  So we have to check in how they are differents
-
             if(len(inVarNames) != 2):
                 raise ValueError(f"Can only do broadcasting if there are two operands.")
             #
@@ -160,34 +164,42 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
             outShp  = tuple(eqn.outvars[0].aval.shape)  # Shape of the output.
             inpShpL = tuple(eqn.invars[0].aval.shape)   # Shape of the left/first input
             inpShpR = tuple(eqn.invars[1].aval.shape)   # Shape of the right/second input; this must be "expanded"
-            assert outShp == inpShpL                    # By our assumptions these checks have to pass
-            assert inpShpL != inpShpR
+            assert inpShpL != inpShpR                   # Some basic checks
             assert len(inpShpL) == len(inpShpR)
-            assert inpShpR[0] == 1      # At least this must hold, indicating padding.
-            assert inpShpL[-1] == inpShpR[-1]
+            assert len(outShp)  == len(inpShpR)
 
-            # We now look for the place where they start to differ
-            #  but we have to do that from right to left, which is a bit of a pain.
-            spltPoint = None
-            for i in reversed(range(len(outShp))):
-                lftSize  = inpShpL[i]       # size of the array in dimension `i`
-                rghtSize = inpShpR[i]
+            # We will now look which dimensions have to be brioadcasted on whioch operator
+            #  I.e. in the dimensions in the lists below there will be no map iteration.
+            dimsToBCastL = []
+            dimsToBCastR = []
 
-                # Depending if we found the splitting point, the checks are different.
-                if(spltPoint is None):              # The splitting point is not yet known
-                    if(lftSize != rghtSize):            # The first time the two dimension differs indicates the splitting point.
-                        assert rghtSize < lftSize
-                        spltPoint = i + 1               # We have to add since we want `inShpR[spltPoint:]` be all correct ones.
-                else:                               # The splitting point is known.
-                    assert rghtSize != 1
-                    assert 0 < rghtSize <= lftSize
-            assert spltPoint is not None
-            expandingBroadcastNeeded = True
+            # According to numpy we have to go through the shapes from behind.
+            for dim in reversed(range(len(outShp))):
+                shpLft = inpShpL[dim]
+                shpRgt = inpShpR[dim]
+
+                if(shpLft == shpRgt):
+                    assert outShp[dim] == shpLft
+                    pass        # The two dimensions are the same, so normal map iterating.
+                elif(shpLft == 1):
+                    assert shpRgt == outShp[dim]
+                    dimsToBCastL.append(dim)
+                elif(shpRgt == 1):
+                    assert shpLft == outShp[dim]
+                    dimsToBCastR.append(dim)
+                else:
+                    raise ValueError(f"Found invalid shaps in dimension {dim} for broadcating. `inpShpL({inpShpL})`, `inpShpR({inpShpR})`, `outShp({outShp})`.")
+                #
+            # end for(dim):
 
         else:
-            if(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
+            if(hasScalarsAsInputs and (not onlyScalarsAsInputs)):
+                pass
+            elif(any([I.aval.shape != eqn.outvars[0].aval.shape  for I in [jIn for jIn, iVN in zip(eqn.invars, inVarNames) if iVN is not None]])):
                 raise ValueError(f"Expected that input ({eqn.invars[0].aval.shape}) and output ({eqn.outvars[0].aval.shape}) have the same shapes.")
-            expandingBroadcastNeeded = False
+            # Since the shapes are the same there is no need for broadcasting, so the two lists are empty.
+            dimsToBCastL = []
+            dimsToBCastR = []
         #
 
         # If the output is not a scalar then we need a map.
@@ -199,20 +211,25 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
         #
 
         tInputs = []
-        for i in range(len(eqn.invars)):
+        for i, dimsToBCast in zip(range(len(eqn.invars)), [dimsToBCastL, dimsToBCastR]):
             if(inVarNames[i] is None):          # Input is a literal, so no data is needed.
                 tInputs.append((None, None))        # the two `None`s are for the connector name and the memlet, they simplyfy coding bellow.
                 continue
             #
 
-            # Depending on if we have a scalar or not the memlet creation differs.
-            #  The scalar one moves all, i.e. a single element and the array one is the usual map thingy that iterates through everything.
-            if(is_scalar):
+            if(is_scalar or (hasScalarsAsInputs and inpScalars[i])):
                 iMemlet = dace.Memlet.from_array(inVarNames[i], translator.getSDFG().arrays[inVarNames[i]])
-            elif(expandingBroadcastNeeded and i != 0):
-                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join(['0'  for _ in range(spltPoint)] + [X[0]  for X in tMapRanges[spltPoint:] ]))
             else:
-                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join([X[0]  for X in tMapRanges]))
+                tInputs_ = []
+                for dim, (mapItVar, _) in enumerate(tMapRanges):
+                    if(dim in dimsToBCast):
+                        tInputs_.append('0')
+                    else:
+                        tInputs_.append(mapItVar)
+                #
+                iMemlet = dace.Memlet.simple(inVarNames[i], ", ".join(tInputs_))
+                del tInputs_
+            #
             tInputs.append( (f'__in{i}', iMemlet) )
         #
 
@@ -307,7 +324,7 @@ class SimpleTranslator(JaxIntrinsicTranslatorInterface):
 
         return tCode
     # end def: _writeTaskletCode
-# end class(SimpleTranslator):
+# end class(ALUTranslator):
 
 
 

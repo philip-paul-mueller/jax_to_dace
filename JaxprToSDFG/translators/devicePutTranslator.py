@@ -11,10 +11,12 @@ from typing import Union
 class DevicePutTranslator(JaxIntrinsicTranslatorInterface):
     """This class acts as a put device primitive.
 
-    Currently this function just copies data around.
+    As far as I understand this primitive should move data from the host to a device (GPU, TPU, ...).
+    However, since only one device is supported, this function essentially copies data from one variable to another.
+    This (useless) transient should then be removed by the simplify pass.
 
-    Todo:
-        Make it handle all the things.
+    See Also:
+        `PJITTranslator` which is the primitive to run something on multiple devices.
     """
     __slots__ = ()
 
