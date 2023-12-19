@@ -3,6 +3,12 @@ This code is able to translate [Jax](https://github.com/google/jax) [code](https
 For more information on how to use it, see [First_translation.ipynb](./First_translation.ipynb).      
 If you make your own tests, please create a new file for this, merging will be simpler.
 
+## Dependencies
+- `JAX`: Vanilla version.
+- `gt4py`: A Version that contains commit `ed77c4` (new argument order of SDFG).
+- `DaCe`: A version that contains commit `206be9` (or the `_fast_call()` routine of the `CompiledSDFG`).
+
+
 # Design
 The code is designed modular, the class `JaxprToSDFG` acts as some kind of driver.
 As the name implies it does not translate the individual Jax Equations to SDFG, instead it delegates this to an appropriate translator.
