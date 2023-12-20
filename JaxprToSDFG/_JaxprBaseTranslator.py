@@ -599,6 +599,12 @@ class JaxprBaseTranslator:
             self._translateEqn(jaxpr, eqn)
         # end for(eqn): transforming
 
+        # TODO: Is this correct?
+        for outVar in jaxpr.jaxpr.outvars:
+            sdfgVar = self.__m_jaxNameMap[str(outVar)]
+            self.__m_sdfg.arrays[sdfgVar].transient = False
+        #
+
         return
     # end def: _translateJaxprInternal
 
