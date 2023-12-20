@@ -4,7 +4,7 @@ import numpy as np
 import dace
 import jax
 
-from typing import Optional
+from typing import Optional, Any
 
 from dace                           import DeviceType, SDFG, SDFGState
 from dace.sdfg.nodes                import NestedSDFG
@@ -55,16 +55,16 @@ def AddNestedSDFG(
         inputNameMapping:           Name mapping for the inputs.
         outputNameMapping:          Name mapping for the outputs.
     """
-    for nameOutside, nameInside in inputNameMapping:
+    for nameOutside, nameInside in inputNameMapping.items():
         if(nameOutside not in parentSDFG.arrays):
-            raise ValueError(f"Expected that `{nameOutside}` is inside the parent SDFG but it was not there (INSIDE).")
-        if(nameInside not in translatedNestedSDFG.sdfg):
-            raise ValueError(f"Expected that `{nameInside}` is inside the nested SDFG but it was not there (INSIDE).")
-    for nameOutside, nameInside in outputNameMapping:
+            raise ValueError(f"Expected that `{nameOutside}` is inside the parent SDFG but it was not there (INSIDE) || {inputNameMapping}.")
+        if(nameInside not in translatedNestedSDFG.sdfg.arrays):
+            raise ValueError(f"Expected that `{nameInside}` is inside the nested SDFG but it was not there (INSIDE) || {inputNameMapping}.")
+    for nameOutside, nameInside in outputNameMapping.items():
         if(nameOutside not in parentSDFG.arrays):
-            raise ValueError(f"Expected that `{nameOutside}` is inside the parent SDFG but it was not there (OUTSIDE).")
-        if(nameInside not in translatedNestedSDFG.sdfg):
-            raise ValueError(f"Expected that `{nameInside}` is inside the nested SDFG but it was not there (OUTSIDE).")
+            raise ValueError(f"Expected that `{nameOutside}` is inside the parent SDFG but it was not there (OUTSIDE) || {outputNameMapping}.")
+        if(nameInside not in translatedNestedSDFG.sdfg.arrays):
+            raise ValueError(f"Expected that `{nameInside}` is inside the nested SDFG but it was not there (OUTSIDE || {outputNameMapping}).")
     #
 
 
@@ -86,16 +86,19 @@ def AddNestedSDFG(
     )
 
     # Now we have to create the input and output memlets.
-    for nameOutside, nameInside in inputNameMapping:
+    for nameOutside, nameInside in inputNameMapping.items():
         readNode = nestedState.add_read(nameOutside)
         nestedState.add_edge(readNode, None, nestedSDFGNode, nameInside,
                              dace.Memlet.from_array(nameOutside, parentSDFG.arrays[nameOutside]))
     #
-    for nameOutside, nameInside in outputNameMapping:
+    for nameOutside, nameInside in outputNameMapping.items():
         writeNode = nestedState.add_write(nameOutside)
-        nestedState.add_edge(nestedSDFGNode, nameInside, nestedSDFGNode, None,
-                             dace.Memlet.from_array(nameOutside, parentSDFG.arrays[nameOutside]))
+        nestedState.add_edge(nestedSDFGNode, nameInside, writeNode, None,
+                             dace.Memlet.from_array(nameInside, nestedSDFG.arrays[nameInside]))
     #
+
+    # Ensure that everything is well
+    parentSDFG.validate()
 
     return nestedSDFGNode
 # end def: AddNestedSDFG

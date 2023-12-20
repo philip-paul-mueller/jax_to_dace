@@ -134,6 +134,9 @@ class JaxprBaseTranslator:
         # Perform the transformation.
         self._translateJaxprInternal(jaxpr, inp_sclar_as_array=sclar_as_array, device=device)
 
+        # Ensure that the SDFG is legit
+        self.__m_sdfg.validate()
+
         # Now export the state and clean it.
         retVal: TranslatedSDFG = self._export_state(doCleaning=True, jaxpr=jaxpr)
 
