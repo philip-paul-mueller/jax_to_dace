@@ -8,7 +8,6 @@ from typing import Optional
 from dace.dtypes    import DeviceType
 from jax._src.core  import ClosedJaxpr, JaxprEqn, Jaxpr
 
-from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
 from JaxprToSDFG._translatedSDFG                 import TranslatedSDFG
 
 
