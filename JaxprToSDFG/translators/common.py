@@ -55,6 +55,8 @@ def AddNestedSDFG(
         inputNameMapping:           Name mapping for the inputs.
         outputNameMapping:          Name mapping for the outputs.
     """
+    from dace.sdfg.propagation          import propagate_memlets_sdfg
+
     for nameOutside, nameInside in inputNameMapping.items():
         if(nameOutside not in parentSDFG.arrays):
             raise ValueError(f"Expected that `{nameOutside}` is inside the parent SDFG but it was not there (INSIDE) || {inputNameMapping}.")
@@ -74,6 +76,9 @@ def AddNestedSDFG(
 
     nestedSDFG: dace.SDFG = translatedNestedSDFG.sdfg
     nestedJaxNameMap: dict[str, str] = translatedNestedSDFG.jaxNameMap
+
+    nestedSDFG.validate()
+    parentSDFG.validate()
 
     # Create and add the nested SDFG node
     nestedSDFGNode: NestedSDFG = nestedState.add_nested_sdfg(
@@ -96,6 +101,9 @@ def AddNestedSDFG(
         nestedState.add_edge(nestedSDFGNode, nameInside, writeNode, None,
                              dace.Memlet.from_array(nameInside, nestedSDFG.arrays[nameInside]))
     #
+
+    # Now propagate the memlets.
+    propagate_memlets_sdfg(parentSDFG)
 
     # Ensure that everything is well
     parentSDFG.validate()
