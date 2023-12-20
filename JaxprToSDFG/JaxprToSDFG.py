@@ -8,8 +8,9 @@ from typing import Optional
 from dace.dtypes    import DeviceType
 from jax._src.core  import ClosedJaxpr, JaxprEqn, Jaxpr
 
-from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
-from ._JaxprBaseTranslator import JaxprBaseTranslator, TranslatedSDFG
+from JaxprToSDFG.JaxIntrinsicTranslatorInterface    import JaxIntrinsicTranslatorInterface
+from JaxprToSDFG._JaxprBaseTranslator               import JaxprBaseTranslator
+from JaxprToSDFG._translatedSDFG                    import TranslatedSDFG
 
 
 class JaxprToSDFG(JaxprBaseTranslator):
@@ -27,6 +28,7 @@ class JaxprToSDFG(JaxprBaseTranslator):
 
     Todos:
         Implement a JIT semantic.
+        Turn `JaxprBaseTranslator` into a member not a base class.
     """
 
 
@@ -142,12 +144,11 @@ class JaxprToSDFG(JaxprBaseTranslator):
         #  However, we will restore it afterwards again, which is a bit stupid.
         #  But I do not like the idea of adding a flag to `_translateJaxpr()` to
         #  prevent dealocation, I want that this feature is explicitly.
-        translatedSDFG: TranslatedSDFG = self._translateJaxpr(
+        translatedSDFG: TranslatedSDFG = self.translateJaxpr(
                 jaxpr=jaxpr,
                 sclar_as_array=bool(device == DeviceType.GPU),
                 device=device,
         )
-        assert translatedSDFG.sdfg is not None
 
         # Now we restore the internal of the translator.
         #  This is esentially needed because we want to create the return values.

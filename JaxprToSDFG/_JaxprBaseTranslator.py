@@ -2,7 +2,6 @@ import numpy as np
 import jax
 import dace
 import sys
-from dataclasses import dataclass
 
 from typing import Optional
 
@@ -10,27 +9,7 @@ from dace.dtypes    import DeviceType
 from jax._src.core  import ClosedJaxpr, JaxprEqn, Jaxpr
 
 from JaxprToSDFG.JaxIntrinsicTranslatorInterface import JaxIntrinsicTranslatorInterface
-
-@dataclass(init=True, repr=True, eq=False, frozen=True, kw_only=True, slots=True)
-class TranslatedSDFG:
-    """This class is used as return argument of the translation.
-    """
-    sdfg:           dace.SDFG
-    startState:     dace.SDFGState
-    finState:       dace.SDFGState
-    jaxNameMap:     dict[str, str]
-    inpNames:       Optional[list[str]]
-    outNames:       Optional[list[str]]
-
-    def __getitem__(self, idx: str):
-        if(not isinstance(idx, str)):
-            raise TypeError(f"Expected `idx` as `str` but got `{type(str)}`")
-        if(not hasattr(self, idx)):
-            raise KeyError(f"The key `{idx}` is not known.")
-        return getattr(self, idx)
-    # end def: __getitem__
-
-# end class(TranslatedSDFG):
+from JaxprToSDFG._translatedSDFG                 import TranslatedSDFG
 
 
 class JaxprBaseTranslator:
@@ -93,7 +72,7 @@ class JaxprBaseTranslator:
 
 
     @staticmethod
-    def _restore_from(translatedSDFG: TranslatedSDFG) -> 'JaxprBaseTranslator':
+    def rebuildFrom(translatedSDFG: TranslatedSDFG) -> 'JaxprBaseTranslator':
         """Builds a `JaxprBaseTranslator` with the given state, that is stored inside a `translatedSDFG`.
 
         Args:
@@ -111,10 +90,10 @@ class JaxprBaseTranslator:
 
 
     ####################################
-    #   Internal Translation Routines
+    #   Translation Routines
     #
 
-    def _translateJaxpr(
+    def translateJaxpr(
             self,
             jaxpr: ClosedJaxpr,
             sclar_as_array: bool = False,
@@ -534,7 +513,7 @@ class JaxprBaseTranslator:
 
         Notes:
             This is an internal function, you should only use it if you know what you are doing.
-                It is recomended to use the `_restore_from()` function which constructs a new instance.
+                It is recomended to use the `rebuildFrom()` function which constructs a new instance.
         """
         if(self._isStateAllocated()):
             raise ValueError(f"Can not load a state, `self` is still allocated.")
