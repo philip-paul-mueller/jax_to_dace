@@ -53,6 +53,7 @@ class JaxprBaseTranslator:
         """`self` is generally stateless, but maintains some variables during translation.
 
         """
+        super().__init__()
         self._clearState()                                  # We now allocate the variables of the internal state
     # end def: __init__
 
@@ -95,8 +96,10 @@ class JaxprBaseTranslator:
     def translateJaxpr(
             self,
             jaxpr: ClosedJaxpr,
+            *,
             sclar_as_array: bool = False,
             device: dace.DeviceType = dace.DeviceType.CPU,
+            allow_empty_jaxpr: bool = False,
     ) -> TranslatedSDFG:
         """This funcunction generates an `SDFG` out of an `Jaxpr`.
 
@@ -118,6 +121,7 @@ class JaxprBaseTranslator:
 
         Args:
             sclar_as_array:     Translate scalar _input_ arguments to arrays.
+            allow_empty_jaxpr:  Allow empty jaxpr instances.
 
         Notes:
             It is important that the returned `SDFG` does not contain any state that needed for returning values.
@@ -126,6 +130,8 @@ class JaxprBaseTranslator:
         """
         if(self._isStateAllocated()):
             raise RuntimeError("`self` is already allocated.")
+        if((len(jaxpr.jaxpr.eqns) == 0) and (not allow_empty_jaxpr)):
+            raise ValueError(f"Your `Jaxpr` has zero equations.")
         #
 
         # Allocate the internal state of self.
@@ -482,6 +488,9 @@ class JaxprBaseTranslator:
         This function turns `self` into an `TranslatedSDFG` instance and then clears the internal state of `self`.
         However, by setting `doCleaning` to `False` no cleaning operation will be done.
         Note that in this case the state of `self` and the one in the returned `TranslatedSDFG` are shared.
+
+        Notes:
+            This function accounts for the renaming in case of empty `Jaxpr`.
         """
         if(not self._isStateAllocated()):
             raise ValueError(f"The state of `self` is not allocated, thus can not export it.")
@@ -490,10 +499,25 @@ class JaxprBaseTranslator:
         if(jaxpr is None):
             inpNames = None
             outNames = None
+
+        elif(isinstance(jaxpr, ClosedJaxpr)):
+            # Turn the Jax variable instances into a string.
+            jaxOutNames = [str(out)  for out in jaxpr.jaxpr.outvars]
+            jaxInpNames = [str(out)  for out in jaxpr.jaxpr.invars]
+
+            # In the case of an empty `Jaxpr`, i.e. no equations, the Jax output variables are no
+            #  longer given by `jaxpr.outvars` instead we have to rename them to the fake output variables
+            #  that we have created in the `_handle_null_jaxpr()` function.
+            if(len(jaxpr.eqns) == 0):
+                jaxOutNames = [f'_zero_equation_hack_for_{out}'  for out in jaxOutNames]
+            #
+
+            # Now translate the Jax names to the SDFG names.
+            inpNames = [self.__m_jaxNameMap[inp]  for inp in jaxInpNames]
+            outNames = [self.__m_jaxNameMap[out]  for out in jaxOutNames]
+
         else:
-            assert isinstance(jaxpr, ClosedJaxpr), f"Expected a `Jaxpr` instance, got `{type(jaxpr)}`."
-            inpNames=[self.__m_jaxNameMap[str(inp)]  for inp in jaxpr.jaxpr.invars]
-            outNames=[self.__m_jaxNameMap[str(out)]  for out in jaxpr.jaxpr.outvars]
+            raise TypeError(f"Can not handle type `{type(jaxpr).__name__}` as `jaxpr` argument in the exporting.")
         #
 
         retVal = TranslatedSDFG(
@@ -600,6 +624,12 @@ class JaxprBaseTranslator:
             self._createConstants(jaxpr, device)
         #
 
+        # This is a special corner case that might be occure in some lambdas.
+        if(len(jaxpr.jaxpr.eqns) == 0):
+            self._handle_null_jaxpr(jaxpr)
+            return
+        #
+
         # Now transforming every equation one by one.
         for eqn in jaxpr.jaxpr.eqns:
             assert not any([str(inVar) == '_'  for inVar in eqn.invars])
@@ -664,6 +694,50 @@ class JaxprBaseTranslator:
         return
     # end def: _translateEqn
 
+
+    def _handle_null_jaxpr(
+            self,
+            jaxpr: ClosedJaxpr,
+    ):
+        """This function is called in case a `Jaxpr` with zero equations is encountered.
+
+        In such a `Jaxpr` an input is just forwarded as output, however, your implementation and dace can not handle this.
+        The solution is that the input is first copied into a temprary which is then considered as true Jax output.
+        The bad thing about this is, that the names denoted in `jaxpr.jaxpr.outvars` can no longer be used to get the output names.
+        Even worse, the names used in `jaxpr.jaxpr.outvars` are known to the internal Jax name to SDFG name, but they are not the outputs.
+        However, since this is a very edgy corner case this should not matter, in addition names of Jax variables are not used after the translation.
+
+        To get the true names of teh output you can use the names that are denoted in the `outNames` of the `TranslatedSDFG` object that is generated.
+        """
+        if(len(jaxpr.jaxpr.eqns) != 0):
+            raise RuntimeError(f"What the hell are you doing, calling the `_handle_null_jaxpr()` on a `jaxpr` with {len(jaxpr.eqns)} equations!")
+        if(len(jaxpr.out_avals) == 0):
+            raise ValueError(f"Seriously, you have a `Jaxpr` with zero outputs.")
+        #
+        print("WARNING: Detected an `Jaxpr` with no equations, will now perform a nasty renaming of the output variables.\n"
+              "          You should consult `JaxprBaseTranslator._handle_null_jaxpr()` in case of errors.",
+              flush=True, file=sys.stderr
+        )
+
+        for jaxOutVar in jaxpr.jaxpr.outvars:
+            # Create the fake Jax output variable and create an sdfg variable for it.
+            altJaxVarName = f'_zero_equation_hack_for_{str(jaxOutVar)}'
+            orgJaxVarSDFGName = self.__m_jaxNameMap[str(jaxOutVar)]
+            _ = self._addArray(jaxOutVar, isTransient=True, altName=altJaxVarName)
+            self.__m_jaxNameMap[altJaxVarName] = altJaxVarName
+
+            # Now copy the input into the fake output variable.
+            inpAcc = self.__m_sdfgHead.add_read(orgJaxVarSDFGName)
+            outAcc = self.__m_sdfgHead.add_write(self.__m_jaxNameMap[altJaxVarName])
+            self.__m_sdfgHead.add_nedge(
+                    src=inpAcc,
+                    dst=outAcc,
+                    data=dace.Memlet.from_array(orgJaxVarSDFGName, self.__m_sdfg.arrays[orgJaxVarSDFGName])
+            )
+        # end for:
+
+        return
+    # end def: _handle_null_jaxpr
 
 
 

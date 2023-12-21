@@ -156,12 +156,17 @@ class JaxprToSDFG(JaxprBaseTranslator):
             translatedSDFG.sdfg.arrays[inpVarName].transient = False
         #
 
+        # In special circumstances we need the list of outputs.
+        #  Esentailly if there are no equations.
+        outVarNames = translatedSDFG.outNames
+
         # Now we restore the internal of the translator.
         #  This is esentially needed because we want to create the return values.
         self._load_state(translatedSDFG)              ; del translatedSDFG
 
         # Now we are creating the return arguments.
-        self._createReturnOutput(jaxpr, ret_by_arg=ret_by_arg)
+        #  Using `outVarNames` ensures that the correct variables are used as output.
+        self._createReturnOutput(jaxpr, ret_by_arg=ret_by_arg, outVarNames=outVarNames)
 
         # This is the SDFG we have created.
         jaxSDFG = self.getSDFG()
@@ -202,7 +207,8 @@ class JaxprToSDFG(JaxprBaseTranslator):
 
     def _createReturnOutput(self,
                             jaxpr: ClosedJaxpr,
-                            ret_by_arg: bool
+                            ret_by_arg: bool,
+                            outVarNames: Optional[list[str]] = None,
     ):
         """Creates the return value statement.
 
@@ -212,6 +218,10 @@ class JaxprToSDFG(JaxprBaseTranslator):
         Args:
             jaxpr:          The `ClosedJaxpr` for which the return statements should be created.
             ret_by_arg:     Create a pseudoargument to return the value instead, see `self.transform()` for more.
+
+        Notes:
+            The `outVarNames` allows to specifies different Jax output names.
+                If you are using it then you have reached guru programming level.
         """
         nbOutVars: int = len(jaxpr.jaxpr.outvars)
         retTuple: bool = nbOutVars > 1
@@ -238,8 +248,14 @@ class JaxprToSDFG(JaxprBaseTranslator):
             # Create an output array that has the same shape as `jaxOutVar` but with name `SDFGoutVar`.
             #  We have to force the creation of a container (otherwhise the code generator will safe the result in a pass by value argument).
             _ = self._addArray(jaxOutVar, isTransient=False, altName=SDFGoutVar, forceArray=True)
-            outVarMap[str(jaxOutVar)] = SDFGoutVar
             sdfgOutVarOrder.append(SDFGoutVar)
+
+            if(outVarNames is None):
+                outVarMap[str(jaxOutVar)] = SDFGoutVar
+            else:
+                outVarMap[outVarNames[i]] = SDFGoutVar
+            #
+
         # end for(i):
 
         # Now we create the return state.
