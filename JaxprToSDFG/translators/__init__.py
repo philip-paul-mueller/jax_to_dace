@@ -19,6 +19,7 @@ from .devicePutTranslator                           import DevicePutTranslator
 from .pjitTranslator                                import PJITTranslator
 from .squeezeTranslator                             import SqueezeTranslator
 from .iotaTranslator                                import IotaTranslator
+from .condTranslator                                import CondTranslator
 
 ALL_TRAFOS = [
     ALUTranslator,
@@ -35,5 +36,6 @@ ALL_TRAFOS = [
     PJITTranslator,
     SqueezeTranslator,
     IotaTranslator,
+    CondTranslator,
 ]
 
