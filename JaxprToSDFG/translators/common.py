@@ -56,6 +56,7 @@ def AddNestedSDFG(
         outputNameMapping:          Name mapping for the outputs.
     """
     from dace.sdfg.propagation          import propagate_memlets_sdfg
+    from itertools                      import chain
 
     for nameOutside, nameInside in inputNameMapping.items():
         if(nameOutside not in parentSDFG.arrays):
@@ -80,6 +81,11 @@ def AddNestedSDFG(
     nestedSDFG.validate()
     parentSDFG.validate()
 
+    # For certain resons we have to make the input and output variables of the nested SDFG non-transient.
+    for varName in chain(translatedNestedSDFG.inpNames, translatedNestedSDFG.outNames):
+        nestedSDFG.arrays[varName].transient = False
+    #
+
     # Create and add the nested SDFG node
     nestedSDFGNode: NestedSDFG = nestedState.add_nested_sdfg(
             sdfg=nestedSDFG,
@@ -87,19 +93,21 @@ def AddNestedSDFG(
             name=name,
             symbol_mapping=symbol_mapping,
             inputs=set(inputNameMapping.values()),      # We need the names inside the nested SDFG
-            outputs=set(outputNameMapping.values()),    #  at least I think that.
+            outputs=set(outputNameMapping.values()),    #  in the end a nested SDFG is just a complex tasklet.
     )
 
     # Now we have to create the input and output memlets.
     for nameOutside, nameInside in inputNameMapping.items():
         readNode = nestedState.add_read(nameOutside)
         nestedState.add_edge(readNode, None, nestedSDFGNode, nameInside,
-                             dace.Memlet.from_array(nameOutside, parentSDFG.arrays[nameOutside]))
+                             dace.Memlet.from_array(nameOutside, parentSDFG.arrays[nameOutside])
+        )
     #
     for nameOutside, nameInside in outputNameMapping.items():
         writeNode = nestedState.add_write(nameOutside)
         nestedState.add_edge(nestedSDFGNode, nameInside, writeNode, None,
-                             dace.Memlet.from_array(nameInside, nestedSDFG.arrays[nameInside]))
+                             dace.Memlet.from_array(nameOutside, parentSDFG.arrays[nameOutside])
+        )
     #
 
     # Now propagate the memlets.
