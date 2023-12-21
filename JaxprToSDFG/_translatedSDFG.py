@@ -9,6 +9,14 @@ from typing import Optional
 @dataclass(init=True, repr=True, eq=False, frozen=False, kw_only=True, slots=True)
 class TranslatedSDFG:
     """This class is used as return argument of the translation.
+
+    The members have the following meaning:
+    - `sdfg` the `SDFG` object that was created.
+    - `statrtState` the first state in the `SDFG` state machine.
+    - `finState` the last state in the state machine.
+    - `jaxNameMap` a `dict` that maps every JAX name to its corresponding SDFG variable name.
+    - `inpNames` a `list` of the `SDFG` variables that are used as input.
+    - `outNames` a `list` of the `SDFG` variables that are used as output.
     """
     sdfg:           dace.SDFG
     startState:     dace.SDFGState
