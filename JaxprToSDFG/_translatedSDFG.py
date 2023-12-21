@@ -33,6 +33,29 @@ class TranslatedSDFG:
         return getattr(self, idx)
     # end def: __getitem__
 
+
+    def validate(self):
+        """Validate the underlying SDFG.
+
+        Before this function calls `validate()` on the SDFG, it will turn any input array into a non transient one.
+        This is done to prevent the issuing of 'non initialized' data warnings in the validation.
+        """
+        orgTransState: dict[str, bool] = {}
+        for var in self.inpNames:
+            orgTransState[var] = self.sdfg.arrays[var].transient
+            self.sdfg.arrays[var].transient = False
+        #
+
+        try:
+            self.sdfg.validate()
+        finally:
+            for var, orgValue in orgTransState.items():
+                self.sdfg.arrays[var].transient = orgValue
+        #
+
+        return True
+    # end def: validate
+
 # end class(TranslatedSDFG):
 
 

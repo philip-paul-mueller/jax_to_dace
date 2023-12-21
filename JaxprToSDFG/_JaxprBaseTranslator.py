@@ -134,11 +134,11 @@ class JaxprBaseTranslator:
         # Perform the transformation.
         self._translateJaxprInternal(jaxpr, inp_sclar_as_array=sclar_as_array, device=device)
 
-        # Ensure that the SDFG is legit
-        self.__m_sdfg.validate()
-
-        # Now export the state and clean it.
-        retVal: TranslatedSDFG = self._export_state(doCleaning=True, jaxpr=jaxpr)
+        # Now export it and clean `self`.
+        #  This indirect and clumsy way allows us to avoid some 'uninitialized transient' warnings.
+        retVal: TranslatedSDFG = self._export_state(doCleaning=False, jaxpr=jaxpr)
+        retVal.validate()
+        self._clearState()
 
         return retVal
     # end def: _translateJaxpr
@@ -695,6 +695,11 @@ class JaxprBaseTranslator:
     ##################################
     #   Misc
     #
+
+
+
+
+
 
     def _appendNewState(self, label: str) -> dace.SDFGState:
         """This function creates a new after the current head with name `name`.

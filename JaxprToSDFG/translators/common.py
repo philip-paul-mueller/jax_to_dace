@@ -68,8 +68,9 @@ def AddNestedSDFG(
             raise ValueError(f"Expected that `{nameOutside}` is inside the parent SDFG but it was not there (OUTSIDE) || {outputNameMapping}.")
         if(nameInside not in translatedNestedSDFG.sdfg.arrays):
             raise ValueError(f"Expected that `{nameInside}` is inside the nested SDFG but it was not there (OUTSIDE || {outputNameMapping}).")
+    if(not translatedNestedSDFG.validate()):
+        raise ValueError(f"Passed translated SDFG that should be inserted as nested SDFG is not valid.")
     #
-
 
     # First we need teh symbol mapping, to properly forward symbols.
     #  If `None` DaCe will try to do this on its own.
@@ -77,9 +78,6 @@ def AddNestedSDFG(
 
     nestedSDFG: dace.SDFG = translatedNestedSDFG.sdfg
     nestedJaxNameMap: dict[str, str] = translatedNestedSDFG.jaxNameMap
-
-    nestedSDFG.validate()
-    parentSDFG.validate()
 
     # For certain resons we have to make the input and output variables of the nested SDFG non-transient.
     for varName in chain(translatedNestedSDFG.inpNames, translatedNestedSDFG.outNames):
@@ -112,9 +110,6 @@ def AddNestedSDFG(
 
     # Now propagate the memlets.
     propagate_memlets_sdfg(parentSDFG)
-
-    # Ensure that everything is well
-    parentSDFG.validate()
 
     return nestedSDFGNode
 # end def: AddNestedSDFG
