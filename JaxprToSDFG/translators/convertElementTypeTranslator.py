@@ -68,8 +68,6 @@ class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
             raise ValueError("Expected that the input and output have the same shape.")
         if(any([inVarNames[i] is None  for i in range(len(inVarNames))])):
             raise ValueError(f"Does not allow for literals in the input arguments.")
-        if(eqn.invars[0].aval.shape == ()):
-            raise ValueError(f"The caster only works for arrays; Output variable '{outVarNames[0]}'; {eqn.invars[0].aval.dtype} -> {eqn.invars[0].aval.dtype}.")
         if(eqn.invars[0].aval.dtype == eqn.outvars[0].aval.dtype):
             print(f"The casting of variable {inVarNames[0]} to {outVarNames[0]} is unnecessary, since both are of type {eqn.outvars[0].aval.dtype}", file=stderr)
         #
@@ -78,15 +76,43 @@ class ConvertElementTypeTranslator(JaxIntrinsicTranslatorInterface):
         inName    = inVarNames[0]
         outName   = outVarNames[0]
         outShape  = eqn.outvars[0].aval.shape
+        name      = 'type_cast_' + inName
 
-        eqnState.add_mapped_tasklet(
-            '_type_cast_',
-            map_ranges={f"__i{dim}": f"0:{s}" for dim, s in enumerate(outShape)},
-            inputs={'__in': dace.Memlet.simple(inName, ", ".join([f"__i{dim}" for dim in range(len(outShape))]))},
-            code=f"__out = __in",
-            outputs={'__out': dace.Memlet.simple(outName, ",".join([f"__i{dim}" for dim in range(len(outShape))]))},
-            external_edges=True
-        )
+        if(outShape == ()):
+            # The scalar case
+            inpAcc = eqnState.add_read(inName)
+            outAcc = eqnState.add_write(outName)
+            copyTasklet = eqnState.add_tasklet(
+                    name=name,
+                    inputs={"__in"}, 
+                    outputs={"__out"},
+                    code="__out = __in",
+            )
+            eqnState.add_edge(
+                    inpAcc,
+                    None,
+                    copyTasklet,
+                    "__in",
+                    dace.Memlet.simple(inName, '0')
+            )
+            eqnState.add_edge(
+                    copyTasklet,
+                    "__out",
+                    outAcc,
+                    None,
+                    dace.Memlet.simple(outName, '0')
+            )
+
+        else:
+            eqnState.add_mapped_tasklet(
+                name,
+                map_ranges={f"__i{dim}": f"0:{s}" for dim, s in enumerate(outShape)},
+                inputs={'__in': dace.Memlet.simple(inName, ", ".join([f"__i{dim}" for dim in range(len(outShape))]))},
+                code=f"__out = __in",
+                outputs={'__out': dace.Memlet.simple(outName, ",".join([f"__i{dim}" for dim in range(len(outShape))]))},
+                external_edges=True
+            )
+        #
         return eqnState
     # end def: translateEqn
 
