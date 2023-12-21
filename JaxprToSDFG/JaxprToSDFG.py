@@ -150,6 +150,12 @@ class JaxprToSDFG(JaxprBaseTranslator):
                 device=device,
         )
 
+        # The input variables were created as transients, so we have to change that.
+        #  It is important that we will not handle the output here, they will be handled further down.
+        for inpVarName in translatedSDFG.inpNames:
+            translatedSDFG.sdfg.arrays[inpVarName].transient = False
+        #
+
         # Now we restore the internal of the translator.
         #  This is esentially needed because we want to create the return values.
         self._load_state(translatedSDFG)              ; del translatedSDFG

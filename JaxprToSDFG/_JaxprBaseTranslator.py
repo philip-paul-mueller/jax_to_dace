@@ -116,13 +116,13 @@ class JaxprBaseTranslator:
 
         The lists `{inp, out}Names` have the same order as their corresponding lists in the `Jaxpr`.
 
-
         Args:
             sclar_as_array:     Translate scalar _input_ arguments to arrays.
 
         Notes:
             It is important that the returned `SDFG` does not contain any state that needed for returning values.
             You will most likely never need to set `sclar_as_array` to `True`.
+            All variables created are transients, it might be needed to turn them into globals.
         """
         if(self._isStateAllocated()):
             raise RuntimeError("`self` is already allocated.")
@@ -346,15 +346,17 @@ class JaxprBaseTranslator:
             self, 
             jaxpr: ClosedJaxpr,
             sclar_as_array: bool = False,
+            isTransient: bool = True,
     ):
-        """Creates the initial inputs, i.e. arguments to the jax expression.
+        """Creates the initial inputs, i.e. arguments to the entier Jax expression.
 
-        There is no function to create the inputs for the indivisual equations, since:
+        By default the variables created by this function are transients, which might be a bit surprising.
+
+        There is no function to create the inputs for the indivisual equations,
+        since their arguments will aready exists because:
         - they are either initial input
         - literals
         - former outputs of some equations.
-
-        thus they will already exists.
 
         Notes:
             My setting `sclar_as_array` to `True` all sclar arguments will be turned into an array with shape `(1, )`.
@@ -377,7 +379,7 @@ class JaxprBaseTranslator:
 
         # We have to iterate through the non closed jaxpr, because there the names are removed.
         for inp in jaxpr.jaxpr.invars:
-            name = self._addArray(inp, isTransient=False, forceArray=forceArray)
+            name = self._addArray(inp, isTransient=isTransient, forceArray=forceArray)
             self.__m_sdfg.arg_names.append(name)
             self.__m_jaxNameMap[str(inp)] = name      # Add the name translation to the map.
         #
@@ -582,6 +584,7 @@ class JaxprBaseTranslator:
 
         # Now we are creating the initial inputs, i.e. the ones that are named in the closure and are the arguments.
         #  Depending on the state turn them into shape one arrays.
+        #  Important: They are created as transients.
         self._createInitialInputs(jaxpr, sclar_as_array=inp_sclar_as_array)
 
         # Now we are creating the constants.
@@ -598,12 +601,6 @@ class JaxprBaseTranslator:
             #
             self._translateEqn(jaxpr, eqn)
         # end for(eqn): transforming
-
-        # TODO: Is this correct?
-        for outVar in jaxpr.jaxpr.outvars:
-            sdfgVar = self.__m_jaxNameMap[str(outVar)]
-            self.__m_sdfg.arrays[sdfgVar].transient = False
-        #
 
         return
     # end def: _translateJaxprInternal
