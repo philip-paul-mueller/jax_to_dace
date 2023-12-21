@@ -18,6 +18,9 @@ class PJITTranslator(JaxIntrinsicTranslatorInterface):
     It allows to perform an operation in a distributed stuff.
     Currently we ignore it and generate an error if this primitive is found.
     It will then output how the translation can be done without generating this primitive.
+
+    Todos:
+        Implement the inlining of functions.
     """
     __slots__ = ()
 
@@ -68,8 +71,8 @@ class PJITTranslator(JaxIntrinsicTranslatorInterface):
         keep_unused                 = params['keep_unused']
         inline                      = params['inline']
 
-        if(not inline):
-            print(f"Will inline pjit[{name}], despite it was not requested.")
+        if(inline):
+            print(f"Will not inline pjit[{name}], despite it was not requested.")
         if(any(donated_invars)):
             print(f"Will not use any donated invariables.")
         if(not all([x is UNSPECIFIED  for x in in_shardings])):
