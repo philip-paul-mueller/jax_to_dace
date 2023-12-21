@@ -15,9 +15,9 @@ from sys import stderr
 class PJITTranslator(JaxIntrinsicTranslatorInterface):
     """`pjit` is essentially distributed stuff.
 
-    It allows to perform an operation in a distributed stuff.
-    Currently we ignore it and generate an error if this primitive is found.
-    It will then output how the translation can be done without generating this primitive.
+    The current translator only supports the case, where no distribution is given.
+    The `pjit` primitive is essentially a lambda function that should be run.
+    The translator will take the lambda turn it into an SDFG and insert it as nested SDFG.
 
     Todos:
         Implement the inlining of functions.
