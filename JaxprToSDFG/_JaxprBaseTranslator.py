@@ -433,7 +433,9 @@ class JaxprBaseTranslator:
 
     def _createJaxVarList(
             self,
-            jaxVarList
+            jaxVarList,
+            prevent_creation: bool = False,
+            only_creation: bool = False,
     ) -> list[str]:
         """This function creates the listed jax variables and returns the SDFG names as a list.
 
@@ -447,14 +449,20 @@ class JaxprBaseTranslator:
 
         retList = []
         for var in jaxVarList:
-            if isinstance(var, jax._src.core.Literal):
-                retList.append(None)                                    # Literal, there is no SDFG variable for this 
+            if isinstance(var, jax._src.core.Literal):              # Literal, there is no SDFG variable for this 
+                if(only_creation):
+                    raise ValueError(f"Requedsted `only_creation`, but `{str(var)}` is a literal and no creation is needed.")
+                retList.append(None)
             elif isinstance(var, jax._src.core.Var):
-                if(str(var) in self.__m_jaxNameMap):                      # The variable is known, so we just return the SDFG name.
+                if(str(var) in self.__m_jaxNameMap):                # The variable is known, so we just return the SDFG name.
+                    if(only_creation):
+                        raise ValueError(f"Requested `only_creation`, but `{str(var)}` already exists as `{self.__m_jaxNameMap[str(var)]}`.")
                     retList.append( self.__m_jaxNameMap[str(var)] )
                 else:
-                    retList.append( self._addArray(var) )               # The variable is not known, so we have to create it
-                    self.__m_jaxNameMap[str(var)] = retList[-1]           #  and add it to the mapping.
+                    if(prevent_creation):
+                        raise ValueError(f"Forbid the creation of variables, but need to create `{str(var)}`.")
+                    retList.append( self._addArray(var) )           # The variable is not known, so we have to create it
+                    self.__m_jaxNameMap[str(var)] = retList[-1]     #  and add it to the mapping.
             else:
                 raise ValueError(f"The translation process is not implemented for '{type(var)}'")
             #
@@ -628,8 +636,8 @@ class JaxprBaseTranslator:
         eqnState = self._appendNewState(label=f'{eqn.primitive.name}_{str(eqn.outvars[0])}__{id(eqn)}')
 
         # We now create the name list for the variables
-        inVarNames  = self._createJaxVarList(eqn.invars )
-        outVarNames = self._createJaxVarList(eqn.outvars)
+        inVarNames  = self._createJaxVarList(eqn.invars,  prevent_creation=True)
+        outVarNames = self._createJaxVarList(eqn.outvars, only_creation=True)
         assert all([(o is not None) and (o in self.__m_sdfg.arrays)  for o in outVarNames])
 
         # Now we look for the translator that can handle the primitive
