@@ -39,6 +39,47 @@ def init_grid_manager(
 # end def: init_grid_manager
 
 
+def compute_e2c2eO(c2e, e2c, with_origin = True)
+    dummy_c2e = np.append(c2e, -np.ones_like(c2e), axis=1)
+    T = dummy_c2e[e2c, :]
+    
+    Ts = T.shape
+    S = T.reshape(Ts[0], Ts[1] * Ts[2])
+    
+    if(with_origin):
+        # Add the origin index
+        SO = np.column_stack((S, np.arange(e2c.shape[0])))
+    else:
+        SO = S
+    #
+
+    
+    # Now we get all the unique indexes, we even remove the invalid stuff
+    u = []
+    for i in range(SO.shape[0]):
+        s = S[i]
+        s = np.unique(s)
+        s = s[s >= 0]
+        u.append(s)
+    #
+    
+    highestCount = np.max([len(x)  for x in u])
+    
+    _e2c2eO = np.zeros((len(u), highestCount))
+    
+    for i, s in enumerate(u):
+        if(len(s) != highestCount):
+            diff = highestCount - len(s)
+            s = np.append(s, -np.ones(diff))
+        #
+        _e2c2eO[i] = s
+    #
+
+    return _e2c2eO
+#
+
+
+
 def simple_grid_gridfile(tmp_path):
     path = tmp_path.joinpath(SIMPLE_GRID_NC).absolute()
     grid = SimpleGrid()
