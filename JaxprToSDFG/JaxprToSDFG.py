@@ -270,7 +270,7 @@ class JaxprToSDFG(JaxprBaseTranslator):
 
         # If needed add the pseudo arguments to the argument list
         if(ret_by_arg):
-            sdfd = self.getSDFG()
+            sdfg = self.getSDFG()
             assert len(sdfg.arg_names) > 0
             for sVar in sdfgOutVarOrder:
                 sdfg.arg_names.append(sVar)
