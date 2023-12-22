@@ -31,7 +31,6 @@ Not yet implemented, sort roughly according to importances:
 - [ ] `scatter_add`
 - [ ] `while`
 - [ ] `fori`
-- [ ] `cond` (conditional)
 - [ ] `scan`
 - [ ] `clamp`
 - [ ] `copy`
@@ -50,9 +49,8 @@ Not yet implemented, sort roughly according to importances:
 - [ ] `dynamic_update_slice`
 - [ ] `bitcast_convert_type`
 - [ ] `erf_inv`
-- [ ] `stop_gradient`
+- [ ] `stop_gradient` (is not needed since Jax should handle that)
 - [ ] `transpose`
-- [ ] `iota`
 - [ ] `coo_fromdense`
 - [ ] `coo_matvec`
 
@@ -109,5 +107,8 @@ Already implemented intrinsics (most of them are arithmetic operations, which ar
 - [x] `or__`
 - [x] `and__`
 - [x] `not__`
+- [x] `cond` (conditional)
+- [x] `pjit`
+- [x] `iota`
 
 
